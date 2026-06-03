@@ -1,0 +1,32 @@
+# Build output
+build/
+tmp/
+releases/
+
+# ESP-IDF generated
+sdkconfig.old
+sdkconfig
+dependencies.lock
+managed_components/
+components/
+
+# IDE
+.vscode/
+.devcontainer/
+.claude/
+.cache/
+.DS_Store
+
+# Python
+*.pyc
+.env
+
+# Generated files
+mmap_generate_*.h
+main/assets/lang_config.h
+main/mmap_generate_emoji.h
+
+# Binary outputs
+*.bin
+*.elf
+*.map

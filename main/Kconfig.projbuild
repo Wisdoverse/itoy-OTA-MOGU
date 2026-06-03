@@ -1,0 +1,34 @@
+menu "itoy OTA 配置"
+
+config OTA_URL
+    string "默认 OTA 升级服务器地址"
+    default "https://api.tenclass.net/xiaozhi/ota/"
+    help
+        设备通过此 URL 检查固件更新和获取服务器配置。
+        需要完整的 HTTP/HTTPS 地址，以 / 结尾。
+
+# 开发板类型固定为 itoy（不可更改）
+config BOARD_TYPE_ITOY_WIFI_LCD
+    bool
+    default y
+
+# itoy SD 卡配置
+choice ITOY_WIFI_LCD_SD_TYPE
+    prompt "SD 卡接口类型"
+    default ITOY_WIFI_LCD_SD_NONE
+    help
+        选择 itoy 开发板的 SD 卡接口方式。
+        不使用 SD 卡可节省 GPIO 资源。
+
+    config ITOY_WIFI_LCD_SD_NONE
+        bool "不使用 SD 卡"
+
+    config ITOY_WIFI_LCD_SD_CARD
+        bool "SD 卡 (SDMMC 模式，高速)"
+
+    config ITOY_WIFI_LCD_SPI_SD
+        bool "SPI SD 卡 (SDSPI 模式，低速)"
+
+endchoice
+
+endmenu
