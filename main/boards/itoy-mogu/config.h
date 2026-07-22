@@ -2,353 +2,89 @@
 #define _BOARD_CONFIG_H_
 
 #include <driver/gpio.h>
+#include <driver/adc.h>
 
-#define AUDIO_INPUT_SAMPLE_RATE  24000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+// ============================================================
+// itoy-mogu PCB GPIO 引脚定义 (按 PADS 网表核对)
+// MCU: ESP32-S3-WROOM-1U (N8R8)
+// 音频: INMP441 (I2S 麦克风) + MAX98357 (I2S 功放)
+// IMU:  QMI8658A (I2C)
+// 电机: 2 路 ULN2003 步进 (点头 + 摇头)
+// ============================================================
 
-#define AUDIO_INPUT_REFERENCE    true
+// --- Touch (4 路触摸铜片) ---
+// ESP32-S3: Touch1=GPIO1, Touch2=GPIO2, Touch3=GPIO3, Touch4=GPIO4
+// GPIO0 为 BOOT 键, 不是触摸通道
+#define TOUCH_PAD_1_GPIO    GPIO_NUM_1
+#define TOUCH_PAD_2_GPIO    GPIO_NUM_2
+#define TOUCH_PAD_3_GPIO    GPIO_NUM_3
+#define TOUCH_PAD_4_GPIO    GPIO_NUM_4
+#define TOUCH_PAD_COUNT     4
 
-#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_38
-#define AUDIO_I2S_GPIO_WS GPIO_NUM_13
-#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_14
-#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_12
-#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_45
+// --- ADC (电位器位置反馈 + 电池电压) ---
+// ESP32-S3 ADC1: GPIO5=CH4, GPIO6=CH5, GPIO7=CH6
+#define POT_NOD_GPIO        GPIO_NUM_6    // 点头电位器 U12 (前后)
+#define POT_SHAKE_GPIO      GPIO_NUM_5    // 摇头电位器 U5  (左右)
+#define POT_NOD_CHAN        ADC1_CHANNEL_5   // GPIO6
+#define POT_SHAKE_CHAN      ADC1_CHANNEL_4   // GPIO5
+#define BATTERY_GPIO        GPIO_NUM_7    // 电池电压检测 (BAT)
+#define BATTERY_ADC_CHAN    ADC1_CHANNEL_6   // GPIO7
+#define POT_ADC_ATTEN       ADC_ATTEN_DB_12
+#define POT_ADC_WIDTH       ADC_BITWIDTH_12
+#define POT_MAX_VALUE       4095
 
-#define AUDIO_CODEC_USE_PCA9557
-#define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_1
-#define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_2
-#define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR
-#define AUDIO_CODEC_ES7210_ADDR  0x82
+// 电位器软限位 (量程百分比, 防止机械顶死), 可按实物调
+#define POT_RANGE_MIN_PCT   10
+#define POT_RANGE_MAX_PCT   90
 
-#define BUILTIN_LED_GPIO        GPIO_NUM_48
-#define BOOT_BUTTON_GPIO        GPIO_NUM_0
-#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_NC
-#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
+// --- I2S 麦克风 (INMP441) ---
+// INMP441: WS, SD(OUT), SCK(BCLK) — 标准 I2S 从设备
+#define MIC_I2S_WS_GPIO     GPIO_NUM_8
+#define MIC_I2S_SD_GPIO     GPIO_NUM_9
+#define MIC_I2S_SCK_GPIO    GPIO_NUM_11
 
+// --- I2S 喇叭功放 (MAX98357) ---
+// MAX98357: DIN, BCLK, LRCLK — I2S 接收端
+#define SPK_I2S_DIN_GPIO    GPIO_NUM_10
+#define SPK_I2S_BCLK_GPIO   GPIO_NUM_12
+#define SPK_I2S_LRCLK_GPIO  GPIO_NUM_13
 
-// //旧版PCB屏幕引脚
-// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_8
-// #define DISPLAY_MOSI_PIN      GPIO_NUM_6
-// #define DISPLAY_CLK_PIN       GPIO_NUM_7
-// #define DISPLAY_DC_PIN        GPIO_NUM_5
-// #define DISPLAY_RST_PIN       GPIO_NUM_NC
-// #define DISPLAY_CS_PIN        GPIO_NUM_4
+// --- I2C (QMI8658A IMU) ---
+#define IMU_I2C_SDA_GPIO    GPIO_NUM_14
+#define IMU_I2C_SCL_GPIO    GPIO_NUM_15
+#define IMU_I2C_PORT        I2C_NUM_0
+#define IMU_I2C_FREQ_HZ     400000
+#define QMI8658A_ADDR       0x6B
 
-// 新版PCB屏幕引脚
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_8
-#define DISPLAY_MOSI_PIN      GPIO_NUM_4
-#define DISPLAY_CLK_PIN       GPIO_NUM_5
-#define DISPLAY_DC_PIN        GPIO_NUM_7
-#define DISPLAY_RST_PIN       GPIO_NUM_NC
-#define DISPLAY_CS_PIN        GPIO_NUM_6//不用时pwm给5-10%省电
+// --- USB ---
+// GPIO19/20 为 USB D+/D-, 烧录口, 不可他用
 
+// --- 电源控制 ---
+#define POWER_ON_GPIO       GPIO_NUM_39   // 按键检测 (SW4 经 Q3 拉低)
+#define POWER_LATCH_GPIO    GPIO_NUM_42   // ON 锁存信号, 拉低触发软关机
 
-// 默认屏幕配置 - 当没有选择任何特定LCD类型时使用
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
+// --- 电机1: 点头 U17 (前后) via U9 ---
+#define MOTOR_NOD_A_GPIO    GPIO_NUM_41
+#define MOTOR_NOD_B_GPIO    GPIO_NUM_40
+#define MOTOR_NOD_C_GPIO    GPIO_NUM_48
+#define MOTOR_NOD_D_GPIO    GPIO_NUM_47
+#define MOTOR_NOD_INVERT    0   // 1 = 翻转正/负方向 (装机方向不对时改这里)
 
-#define SPEAKER_UPCTRAL_PIN GPIO_NUM_15  // 控制扬声器打开、不用时关掉省电
-#define SD_DOWNCTRAL_PIN GPIO_NUM_21//控制sd打开、不用时关掉省电
-#define MCU_POWER_PIN GPIO_NUM_9//上控制主芯片打开
-#define MCU_POWERJUDGE_PIN GPIO_NUM_11//下控制主芯片快速关机
-/*
- ！！！！！！注意！！！！！！！
-gpio 19
-gpio 20
-不能使用，此为烧录口
-*/
+// --- 电机2: 摇头 U16 (左右) via U8 ---
+#define MOTOR_SHAKE_A_GPIO  GPIO_NUM_21
+#define MOTOR_SHAKE_B_GPIO  GPIO_NUM_18
+#define MOTOR_SHAKE_C_GPIO  GPIO_NUM_17
+#define MOTOR_SHAKE_D_GPIO  GPIO_NUM_16
+#define MOTOR_SHAKE_INVERT  0   // 1 = 翻转正/负方向
 
+// --- 步进电机参数 ---
+#define MOTOR_STEP_DELAY_MS 2       // 步进间隔 (ms), 越小越快
+// 28BYJ-48 + ULN2003, 8 拍半步模式: 约 4096 步/圈 (1:64 减速)
+#define MOTOR_STEPS_PER_REV 4096
 
-//电池电量控制引脚
-#define EXAMPLE_ADC1_CHAN0          ADC_CHANNEL_2  // GPIO3
-#define EXAMPLE_ADC1_CHAN1          ADC_CHANNEL_7  // GPIO8
-#define EXAMPLE_ADC_ATTEN           ADC_ATTEN_DB_12
-
-#define BATTERY_GPIO GPIO_NUM_3
-
-// SD Card pins - for audio recording
-#if CONFIG_ITOY_WIFI_LCD_SD_CARD
-// SD card (SDMMC mode) pins
-#define SD_CARD_CMD_GPIO GPIO_NUM_21
-#define SD_CARD_CLK_GPIO GPIO_NUM_47
-#define SD_CARD_DO_GPIO  GPIO_NUM_48
-#elif CONFIG_ITOY_WIFI_LCD_SPI_SD
-// SPI SD (SDSPI mode) pins
-#define SD_CARD_CS_GPIO  GPIO_NUM_NC //未来时21
-#define SD_CARD_CLK_GPIO GPIO_NUM_47
-#define SD_CARD_DO_GPIO  GPIO_NUM_48
-#define SD_CARD_CMD_GPIO GPIO_NUM_39
-#else
-// SD card disabled
-#define SD_CARD_CS_GPIO  GPIO_NUM_NC
-#define SD_CARD_CLK_GPIO GPIO_NUM_NC
-#define SD_CARD_DO_GPIO  GPIO_NUM_NC
-#define SD_CARD_CMD_GPIO GPIO_NUM_NC
-#endif
-
-
-#ifdef CONFIG_LCD_ST7789_240X320
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   320
-#define DISPLAY_HEIGHT  240
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY true
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_240X320_NO_IPS
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    false
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_170X320
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   170
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  35
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_172X320
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   172
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  34
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_240X280
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  280
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  20
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_240X240
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7789_240X240_7PIN
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 3
-#endif
-
-#ifdef CONFIG_LCD_ST7789_240X135
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  135
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY true
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  40
-#define DISPLAY_OFFSET_Y  53
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7735_128X160
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  160
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    false
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7735_128X128
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  128
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR  false
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  32
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7796_320X480
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   320
-#define DISPLAY_HEIGHT  480
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ST7796_320X480_NO_IPS
-#define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   320
-#define DISPLAY_HEIGHT  480
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    false
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ILI9341_240X320
-#define LCD_TYPE_ILI9341_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_ILI9341_240X320_NO_IPS
-#define LCD_TYPE_ILI9341_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    false
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_GC9A01_240X240
-#define LCD_TYPE_GC9A01_SERIAL
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
-#define DISPLAY_SWAP_XY true
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-#ifdef CONFIG_LCD_CUSTOM
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
-// 默认屏幕配置 - 当没有选择任何特定LCD类型时使用
-#ifndef DISPLAY_WIDTH
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR    true
-#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
-#define DISPLAY_SPI_MODE 0
-#endif
-
+// 电位器方向标定: 正转(cw)是否使该轴电位器读数增大
+// 1 = 增大, 0 = 减小。实测若软限位在刚起步就立即触发, 把对应项取反
+#define MOTOR_NOD_POT_CW_INC   1
+#define MOTOR_SHAKE_POT_CW_INC 1
 
 #endif // _BOARD_CONFIG_H_

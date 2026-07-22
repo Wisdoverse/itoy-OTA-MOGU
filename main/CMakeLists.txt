@@ -8,7 +8,7 @@ set(SOURCES "system_info.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS ".")
+set(INCLUDE_DIRS "." "boards/itoy-mogu")
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
@@ -26,6 +26,7 @@ list(APPEND SOURCES ${BOARD_SOURCES})
 
 idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
+                    REQUIRES driver app_update spi_flash nvs_flash efuse esp_app_format esp_adc
                     WHOLE_ARCHIVE
                     )
 
