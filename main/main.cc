@@ -10,6 +10,8 @@
 #include "board.h"
 #include "system_info.h"
 #include "ota.h"
+#include "stepper_motor.h"
+#include "power_control.h"
 
 #define TAG "main"
 
@@ -129,6 +131,10 @@ static void CheckNewVersion(Ota& ota) {
 
 extern "C" void app_main(void)
 {
+    // 电源控制：必须在最早期锁定供电，赶在用户松开开机键之前。
+    // 随后启动按键监测任务：长按电源键 2s 即软关机（两脚拉低）。
+    PowerControlInit();
+
     // 初始化默认事件循环
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -144,6 +150,10 @@ extern "C" void app_main(void)
     // 初始化开发板并启动网络（WiFi 配网或连接已知网络）
     auto& board = Board::GetInstance();
     ESP_LOGI(TAG, "开发板: %s, UUID: %s", board.GetBoardType().c_str(), board.GetUuid().c_str());
+
+    // 步进电机测试模块：尽早启动串口命令任务，避免被下方 WiFi 配网 / OTA 重试流程阻塞。
+    // 设备未配网时会长时间卡在配网和 OTA 重试，此时电机命令仍需可用。
+    StepperTestStart();
 
     ESP_LOGI(TAG, "========== 正在启动网络 ==========");
     board.StartNetwork();

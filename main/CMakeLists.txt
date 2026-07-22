@@ -5,6 +5,8 @@ set(SOURCES "system_info.cc"
             "ota.cc"
             "settings.cc"
             "device_state_event.cc"
+            "stepper_motor.cc"
+            "power_control.cc"
             "main.cc"
             )
 
@@ -23,6 +25,8 @@ file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
+# 加入板级目录到头文件搜索路径，使模块可通过 #include "config.h" 读取板级引脚配置
+list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
 
 idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
