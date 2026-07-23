@@ -71,6 +71,15 @@ private:
     };
 };
 
+// 手势脚本中的一步: 指定电机走 N 步 (正=cw/负=ccw), 每步延时 delay_ms (即速度)
+struct GestureStep {
+    uint8_t motor;     // MotorId
+    int16_t steps;     // 有符号步数
+    uint16_t delay_ms; // 单步延时 (速度)
+};
+
+#define MAX_GESTURE_STEPS 16
+
 class MotorControl {
 public:
     MotorControl();
@@ -95,6 +104,13 @@ public:
     // 步进到目标电位器百分比 (0~100), 带最大步数保护
     void MoveToPercent(MotorId id, int percent);
 
+    // ---- 非阻塞手势 (情绪状态用, 由电机任务播放) ----
+    // 播放一段手势脚本 (拷贝到内部缓冲, 立即返回)
+    void PlayGesture(const GestureStep* steps, int n);
+    bool IsGestureDone() const { return gesture_done_; }
+    void StopGesture();          // 立即停止手势/驱动并断电
+    void Home();                 // 两电机向中立位(电位器 50%)回中, 步数有上限
+
     // 位置读取
     uint32_t ReadNodPosition();
     uint32_t ReadShakePosition();
@@ -104,6 +120,7 @@ public:
 private:
     static void MotorTaskFunc(void* arg);
     void MotorLoop();
+    int GestureTick();   // 推进手势一微步, 返回本步延时 ms
 
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     StepperMotor* motors_[MOTOR_COUNT]{};
@@ -112,6 +129,14 @@ private:
     SemaphoreHandle_t step_mutex_ = nullptr;        // 串行化步进 (驱动任务 vs 手势)
     TaskHandle_t motor_task_ = nullptr;
     volatile int active_dir_[MOTOR_COUNT]{};        // 每电机当前驱动方向 +1/-1/0
+
+    // 手势播放器
+    GestureStep gesture_[MAX_GESTURE_STEPS]{};
+    int gesture_len_ = 0;
+    int gesture_idx_ = 0;
+    int gesture_remaining_ = 0;
+    volatile bool gesture_active_ = false;
+    volatile bool gesture_done_ = true;
 };
 
 #endif // MOTOR_CONTROL_H_

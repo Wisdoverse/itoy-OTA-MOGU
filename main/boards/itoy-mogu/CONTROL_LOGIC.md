@@ -24,20 +24,16 @@
 > ADC1 通道对照（ESP32-S3）：GPIO5=CH4，GPIO6=CH5，GPIO7=CH6。
 > GPIO0 为 BOOT 键，**不是**触摸通道。
 
-## 2. 触摸铜片 → 电机 映射
+## 2. 触摸分组（左手 / 右手）
 
-共 4 个触摸铜片，2 个电机各管正/反两个方向。**按住即动，松开即停**。
+4 个触摸铜片分为左右两只"手"，触摸**不再直接驱动电机**，而是触发**情绪状态**（见第 7 节状态机）：
 
-| 触摸通道 | GPIO | 动作 |
+| 分组 | 触摸通道 | GPIO |
 |---|---|---|
-| ch0 (Touch1) | GPIO1 | 点头正转（向前） |
-| ch1 (Touch2) | GPIO2 | 点头反转（向后） |
-| ch2 (Touch3) | GPIO3 | 摇头正转（向左） |
-| ch3 (Touch4) | GPIO4 | 摇头反转（向右） |
+| 左手 | ch0 ‖ ch1 | GPIO1 ‖ GPIO2 |
+| 右手 | ch2 ‖ ch3 | GPIO3 ‖ GPIO4 |
 
-- 同一电机的两个方向互斥（前/后取先按下的那个）。
-- 两个电机可同时动作（例如同时点头+摇头）。
-- 任意 pad 状态变化时，按当前 4 路实时触摸状态重算两个电机方向，因此**释放**会正确停掉对应电机（见 `itoy-v1.0.cc::OnTouchEvent`）。
+任一铜片被摸即视为该手有触摸。短按/长按/双手等交互由 `MoodController` 分类（见第 7 节）。
 
 ## 3. 行为细节
 
@@ -101,7 +97,39 @@ rgb.Refresh();
 
 > 上电默认熄灭，避免长灯带在 3V3 上瞬间大电流。需要状态指示（如触摸时变色）可在 `OnTouchEvent` 回调里驱动 `rgb_`。
 
-## 7. 待确认 / 后续可调项
+## 7. 情绪状态机交互框架（MoodController）
+
+按《情绪蘑菇》交互设计实现。`MoodController`（`mood_controller.h/.cc`）以 100ms 任务轮询触摸/电池，分类事件，驱动 10 个状态；每个状态入场设置 RGB 效果 + 电机手势。**取代旧的"按住即动"**（`Drive` API 保留供手动/调试，但情绪流程走手势 `PlayGesture`）。
+
+### 状态与触发（摘要，详见设计 md）
+
+| 状态 | 触发 | RGB | 电机手势 |
+|---|---|---|---|
+| OFF | 关机 | 渐灭→0 | Home 回中,随后断电 |
+| POWER_ON | 开机 | 0→平静亮度渐亮(2-3s) | 低头位→中立(轻微仰头) |
+| **CALM**(默认) | 自动/返回 | 暖光呼吸 ±5%(3.5s) | 回中静止 |
+| HAPPY | 摸一下(短按) | 亮度 +15% | 仰头+左右摆 1-2 次 |
+| COMFORT | 握一只手≥3s | 渐降到 75%(2-3s) | 缓慢前倾(倾听) |
+| DEEP_BREATH | 双手握≥5s | 慢呼吸 30-100%(7s) | 缓慢前倾↔回中 ×2 |
+| SLEEPY | 10min 无互动 | 低亮慢呼吸 20-40% | 缓慢低头 |
+| DISTURBED | 5s 内≥3 次短按 | 快速亮暗(0.4s,10-90%) | 快速低头/歪头 |
+| LOW_BATTERY | 电量<15%(抢占) | 极弱慢呼吸 5-25% | 轻微低头 |
+| NIGHT_LIGHT | app/按键 | 固定低亮 15% | 静止 |
+
+- **优先级**：`POWER_OFF` 任意态→OFF；`BATTERY_LOW` 任意非OFF态→LOW_BATTERY（抢占）。
+- **自动返回**：HAPPY 4s / DEEP_BREATH 45s / DISTURBED 7s 超时回 CALM；COMFORT 在触摸结束后 3s 回 CALM；SLEEPY 任一触摸→HAPPY。
+- **触摸分类**（`PollTouch`）：短按<1s；单手≥3s；双手≥5s；5s 窗口≥3 次短按→受扰。
+
+### 可调参数（`mood_controller.cc` 顶部宏）
+- 时长：`SHORT_TAP_MAX_MS`(1000)、`HOLD_ONE_MS`(3000)、`HOLD_BOTH_MS`(5000)、`NO_TOUCH_SLEEP_MS`(600000)、`T_HAPPY/DEEP_BREATH/DISTURBED/COMFORT_REL`、`RAPID_WINDOW_MS/COUNT`。
+- RGB：`WARM_R/G/B`（暖光基色）、`CALM_BRIGHT_PCT`(50)、各状态亮度/周期。
+- 手势：`G_NOD_*`/`G_WIG_*`/`G_TILT_*`/`G_BREATH_AMP`（步数）、`SP_SLOW/NORMAL/FAST`（速度）。
+- 电池：`BATT_LOW_PCT/RECOVER_PCT`。
+
+### 声音
+设计 md 提到苏醒/回应音；当前**无音频资源/管线**，暂未实现（留 TODO）。`PowerControl::RequestShutdown()` 已接 OFF 状态用于关机断电。
+
+## 8. 待确认 / 后续可调项
 - [ ] 实测确认两个电机的正负方向是否需要 `*_INVERT`。
 - [ ] 实测确认电位器方向 `*_POT_CW_INC`（软限位是否误触发）。
 - [ ] 标定软限位区间 `POT_RANGE_MIN/MAX_PCT` 与电池分压比 `BATT_DIVIDER_RATIO`。

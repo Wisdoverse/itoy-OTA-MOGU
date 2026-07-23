@@ -226,20 +226,100 @@ void MotorControl::MotorTaskFunc(void* arg) {
 
 void MotorControl::MotorLoop() {
     while (true) {
-        bool any = false;
+        int delay_ms = 50;
         xSemaphoreTake(step_mutex_, portMAX_DELAY);
-        for (int i = 0; i < MOTOR_COUNT; i++) {
-            int d = active_dir_[i];
-            if (d != 0) {
-                motors_[i]->StepOnceLimited(d > 0);
-                any = true;
+        if (gesture_active_) {
+            delay_ms = GestureTick();                 // 手势优先
+        } else {
+            bool any = false;
+            for (int i = 0; i < MOTOR_COUNT; i++) {
+                int d = active_dir_[i];
+                if (d != 0) {
+                    motors_[i]->StepOnceLimited(d > 0);
+                    any = true;
+                }
             }
+            if (any) delay_ms = MOTOR_STEP_DELAY_MS;
         }
         xSemaphoreGive(step_mutex_);
 
-        // 有驱动时按步进间隔跑; 空闲时长睡省电
-        vTaskDelay(pdMS_TO_TICKS(any ? MOTOR_STEP_DELAY_MS : 50));
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
+}
+
+// 推进手势一微步, 返回本步延时 (速度)
+int MotorControl::GestureTick() {
+    if (gesture_idx_ >= gesture_len_) {
+        gesture_active_ = false;
+        gesture_done_ = true;
+        return 50;
+    }
+    if (gesture_remaining_ <= 0) {
+        // 当前步走完, 进入下一步
+        gesture_idx_++;
+        if (gesture_idx_ >= gesture_len_) {
+            gesture_active_ = false;
+            gesture_done_ = true;
+            return 50;
+        }
+        gesture_remaining_ = std::abs((int)gesture_[gesture_idx_].steps);
+        return gesture_[gesture_idx_].delay_ms ? gesture_[gesture_idx_].delay_ms
+                                               : MOTOR_STEP_DELAY_MS;
+    }
+    const GestureStep& gs = gesture_[gesture_idx_];
+    if (gs.motor < MOTOR_COUNT) {
+        motors_[gs.motor]->StepOnceLimited(gs.steps >= 0);
+    }
+    gesture_remaining_--;
+    return gs.delay_ms ? gs.delay_ms : MOTOR_STEP_DELAY_MS;
+}
+
+void MotorControl::PlayGesture(const GestureStep* steps, int n) {
+    if (!initialized_ || !steps || n <= 0) return;
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
+    int len = n > MAX_GESTURE_STEPS ? MAX_GESTURE_STEPS : n;
+    for (int i = 0; i < len; i++) gesture_[i] = steps[i];
+    gesture_len_ = len;
+    gesture_idx_ = 0;
+    gesture_remaining_ = std::abs((int)gesture_[0].steps);
+    gesture_active_ = true;
+    gesture_done_ = false;
+    xSemaphoreGive(step_mutex_);
+}
+
+void MotorControl::StopGesture() {
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    gesture_active_ = false;
+    gesture_done_ = true;
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+        active_dir_[i] = 0;
+        if (motors_[i]) motors_[i]->Stop();
+    }
+    xSemaphoreGive(step_mutex_);
+}
+
+void MotorControl::Home() {
+    if (!initialized_) return;
+    GestureStep script[MOTOR_COUNT];
+    int n = 0;
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+        uint32_t pot = motors_[i]->ReadPotentiometer();
+        uint32_t mid = (motors_[i]->pot_min() + motors_[i]->pot_max()) / 2;
+        int delta = (int)mid - (int)pot;
+        // 电位器增量 -> 步数 (启发式缩放, 需实测校准)
+        int steps = delta / 4;
+        if (motors_[i]->pot_cw_inc() == 0) steps = -steps;
+        if (steps > 300) steps = 300;
+        if (steps < -300) steps = -300;
+        if (steps != 0) {
+            script[n].motor = (uint8_t)i;
+            script[n].steps = (int16_t)steps;
+            script[n].delay_ms = (uint16_t)(MOTOR_STEP_DELAY_MS * 3);   // 回中慢速
+            n++;
+        }
+    }
+    PlayGesture(script, n);
 }
 
 void MotorControl::NodSteps(int steps) {
