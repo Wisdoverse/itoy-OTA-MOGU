@@ -14,6 +14,7 @@
 | 电池电压 BAT | 7 | BAT | ADC1_CH6，R7/R6 分压 |
 | 触摸铜片 ×4 | 1 / 2 / 3 / 4 | IO1/2/3/4 | Touch1–4，不含 GPIO0 |
 | IMU QMI8658A | SDA 14 / SCL 15 | I2C_SDA/SCL | I2C_NUM_0, 400kHz, 0x6B |
+| **RGB 灯带 WS2812B** | 38 (DIN) | U13 连接器 | GND/3V3/DIN 三线，灯珠数见 Kconfig |
 | 电源 ON 锁存 | 42 | IO42 | 拉低触发软关机 |
 | 电源按键检测 | 39 | IO39 | SW4 经 Q3，长按 3s 关机 |
 | 麦克风 I2S | WS 8 / SD 9 / SCK 11 | I2S_WS/SD/SCK | INMP441 |
@@ -72,9 +73,38 @@
 - 电池电压：`ReadBatteryMv()`，分压比 `BATT_DIVIDER_RATIO`（默认 2.0，待知 R6/R7 阻值后校准）。
 - ADC 共享：`MotorControl` 创建唯一 `ADC_UNIT_1` 单元，配置 3 通道（点头/摇头/电池）；`PowerControl::SetBatteryAdc()` 复用同一句柄，避免重复创建冲突。
 
-## 6. 待确认 / 后续可调项
+## 6. RGB 灯带 (WS2812B)
+
+- **硬件**：WS2812B 灯带经 **U13 连接器** 接入（GND / 3V3 / DIN 三线），**GPIO38 = DIN**。
+- **灯珠数量**：通过 Kconfig 配置 —— `menuconfig` → itoy OTA 配置 → `WS2812B RGB 灯珠数量`（`CONFIG_ITOY_RGB_LED_COUNT`，默认 1）。按实际灯带长度修改后重新编译。
+- **驱动**：`RgbLed`（`rgb_led.h/.cc`），基于 `led_strip` 组件的 RMT 后端，GRB 顺序，10MHz 时序。
+
+API（`MotorControl`/`RgbLed` 等通过 `ItoyMogu::GetRgb()` 获取）：
+
+| 方法 | 说明 |
+|---|---|
+| `Initialize()` | 初始化灯带（板级已调用），默认熄灭 |
+| `SetPixel(idx, r, g, b)` | 单灯颜色（0~count-1），需再 `Refresh()` |
+| `Fill(r, g, b)` | 全部灯同色 |
+| `Clear()` | 全部熄灭 |
+| `Refresh()` | 把缓冲推送到灯带（设色后必须调用） |
+| `SetBrightness(0~255)` | 全局亮度缩放 |
+| `count()` | 当前灯珠数 |
+
+示例（应用层点亮第一个灯红色）：
+```cpp
+auto& rgb = board.GetRgb();
+rgb.SetBrightness(60);        // 限流/限亮
+rgb.SetPixel(0, 255, 0, 0);  // GRB: 红
+rgb.Refresh();
+```
+
+> 上电默认熄灭，避免长灯带在 3V3 上瞬间大电流。需要状态指示（如触摸时变色）可在 `OnTouchEvent` 回调里驱动 `rgb_`。
+
+## 7. 待确认 / 后续可调项
 - [ ] 实测确认两个电机的正负方向是否需要 `*_INVERT`。
 - [ ] 实测确认电位器方向 `*_POT_CW_INC`（软限位是否误触发）。
 - [ ] 标定软限位区间 `POT_RANGE_MIN/MAX_PCT` 与电池分压比 `BATT_DIVIDER_RATIO`。
 - [ ] 触摸阈值：当前按基线 ×0.8，可按铜片尺寸/灵敏度调 `TouchPad::Calibrate()` 的 ratio。
+- [ ] RGB 灯带：按实物在 menuconfig 设 `CONFIG_ITOY_RGB_LED_COUNT`；注意 U13 由 3V3 供电，灯珠多时需确认供电与亮度（用 `SetBrightness` 限流）。
 - [ ] （可选）待机随机动作、IMQ 加速度检测拍打互动等，后续按需加。

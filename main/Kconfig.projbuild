@@ -31,4 +31,12 @@ choice ITOY_WIFI_LCD_SD_TYPE
 
 endchoice
 
+# itoy-mogu RGB 灯带配置
+config ITOY_RGB_LED_COUNT
+    int "WS2812B RGB 灯珠数量"
+    default 1
+    help
+        连接在 GPIO38 (U13 连接器 DIN) 的 WS2812B 灯带灯珠数量。
+        根据实际灯带长度在 menuconfig 中修改。
+
 endmenu

@@ -59,6 +59,14 @@
 // --- USB ---
 // GPIO19/20 为 USB D+/D-, 烧录口, 不可他用
 
+// --- RGB LED (WS2812B 灯带, 经 U13 连接器) ---
+// U13 = 3P 连接器 (GND / 3V3 / DIN), GPIO38 为 DIN
+// 灯珠数量由 Kconfig CONFIG_ITOY_RGB_LED_COUNT 配置 (menuconfig 可改)
+#define RGB_LED_GPIO        GPIO_NUM_38
+#ifndef CONFIG_ITOY_RGB_LED_COUNT
+#define CONFIG_ITOY_RGB_LED_COUNT 1   // Kconfig 未生成时的回退默认值
+#endif
+
 // --- 电源控制 ---
 #define POWER_ON_GPIO       GPIO_NUM_39   // 按键检测 (SW4 经 Q3 拉低)
 #define POWER_LATCH_GPIO    GPIO_NUM_42   // ON 锁存信号, 拉低触发软关机

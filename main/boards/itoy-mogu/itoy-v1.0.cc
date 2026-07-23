@@ -4,6 +4,7 @@
 #include "motor_control.h"
 #include "power_control.h"
 #include "imu_qmi8658a.h"
+#include "rgb_led.h"
 
 #include <esp_log.h>
 
@@ -15,6 +16,7 @@ private:
     MotorControl motor_;
     PowerControl power_;
     ImuQMI8658A imu_;
+    RgbLed rgb_;
 
     // 触摸事件 -> 电机驱动 (任意 pad 状态变化时重算两个电机方向)
     void OnTouchEvent(int channel, bool pressed) {
@@ -46,21 +48,24 @@ public:
         // 3. 电池 ADC 共享句柄 (电源读电池用)
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
 
-        // 4. 触摸面板 + 绑定控制逻辑
+        // 4. RGB 灯带 (WS2812B, GPIO38 经 U13 连接器), 上电默认熄灭
+        rgb_.Initialize();
+
+        // 5. 触摸面板 + 绑定控制逻辑
         touch_.Initialize();
         touch_.SetCallback([this](int channel, bool pressed) {
             this->OnTouchEvent(channel, pressed);
         });
         touch_.StartScanTask(30);   // 30ms 轮询
 
-        // 5. 启动电机步进消费任务 (按住即动 + 软限位)
+        // 6. 启动电机步进消费任务 (按住即动 + 软限位)
         motor_.StartMotorTask();
 
-        ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV",
+        ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV, RGB=%dLEDs",
                  motor_.ReadNodPosition(), motor_.ReadShakePosition(),
-                 power_.ReadBatteryMv());
+                 power_.ReadBatteryMv(), rgb_.count());
 
-        // 6. IMU (QMI8658A) - 可选, 失败不影响启动
+        // 7. IMU (QMI8658A) - 可选, 失败不影响启动
         esp_err_t imu_ret = imu_.Initialize();
         if (imu_ret == ESP_OK) {
             ImuData data;
@@ -86,6 +91,7 @@ public:
     MotorControl& GetMotor() { return motor_; }
     PowerControl& GetPower() { return power_; }
     ImuQMI8658A& GetImu() { return imu_; }
+    RgbLed& GetRgb() { return rgb_; }
 };
 
 DECLARE_BOARD(ItoyMogu)
