@@ -86,9 +86,12 @@
 #define MOTOR_SHAKE_INVERT  0   // 1 = 翻转正/负方向
 
 // --- 步进电机参数 ---
-#define MOTOR_STEP_DELAY_MS 2       // 步进间隔 (ms), 越小越快
-// 28BYJ-48 + ULN2003, 8 拍半步模式: 约 4096 步/圈 (1:64 减速)
-#define MOTOR_STEPS_PER_REV 4096
+#define MOTOR_STEP_DELAY_MS 2       // 半步间隔 (ms), 越小越快
+// 28BYJ-48 + ULN2003, 5.625°/全步, 1:64 减速:
+//   全步(4 拍) = 4096 步/圈;  半步(8 拍, 本工程 kHalfStepSeq) = 8192 步/圈
+#define MOTOR_STEPS_PER_REV 8192
+// 角度 -> 步数换算 (供手势/旋转用), 例: STEPS_FOR_DEG(10) ≈ 227 步
+#define STEPS_FOR_DEG(deg)   ((int)((deg) * MOTOR_STEPS_PER_REV / 360))
 
 // 电位器方向标定: 正转(cw)是否使该轴电位器读数增大
 // 1 = 增大, 0 = 减小。实测若软限位在刚起步就立即触发, 把对应项取反

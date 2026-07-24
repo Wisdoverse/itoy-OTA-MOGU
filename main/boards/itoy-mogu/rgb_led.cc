@@ -56,6 +56,7 @@ void RgbLed::SetBrightness(uint8_t cap_pct) {
 void RgbLed::Off() {
     effect_ = RGB_OFF;
     dirty_ = true;
+    ESP_LOGI(TAG, "rgb OFF");
 }
 
 void RgbLed::Solid(uint8_t r, uint8_t g, uint8_t b, uint8_t bright_pct) {
@@ -64,6 +65,7 @@ void RgbLed::Solid(uint8_t r, uint8_t g, uint8_t b, uint8_t bright_pct) {
     cur_pct_ = bright_pct;
     effect_ = RGB_SOLID;
     dirty_ = true;
+    ESP_LOGI(TAG, "rgb SOLID (%d,%d,%d) %d%%", r, g, b, bright_pct);
 }
 
 void RgbLed::Breath(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
@@ -77,6 +79,8 @@ void RgbLed::Breath(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
     hi_pct_ = hi_pct;
     effect_ = RGB_BREATH;
     dirty_ = true;
+    ESP_LOGI(TAG, "rgb BREATH (%d,%d,%d) %d%%<->%d%% per %lums",
+             r, g, b, lo_pct, hi_pct, (unsigned long)period_ms);
 }
 
 void RgbLed::FadeTo(uint8_t r, uint8_t g, uint8_t b, uint8_t target_pct, uint32_t dur_ms) {
@@ -88,6 +92,8 @@ void RgbLed::FadeTo(uint8_t r, uint8_t g, uint8_t b, uint8_t target_pct, uint32_
     fade_start_tick_ = tick_;
     effect_ = RGB_FADE;
     dirty_ = true;
+    ESP_LOGI(TAG, "rgb FADE (%d,%d,%d) ->%d%% over %lums",
+             r, g, b, target_pct, (unsigned long)dur_ms);
 }
 
 uint8_t RgbLed::ComputeBrightPct() {

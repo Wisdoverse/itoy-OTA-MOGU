@@ -34,18 +34,22 @@
 #define BATT_RECOVER_PCT  15
 #define BATT_CHECK_MS     5000
 
-// 手势幅度 (步数) / 速度 (每步延时 ms = MOTOR_STEP_DELAY_MS 倍数)
-#define G_NOD_OPEN     140
-#define G_NOD_HAPPY    90
-#define G_WIG_HAPPY    70
-#define G_TILT_COMFORT 60
-#define G_TILT_SLEEP   45
-#define G_TILT_LOWBAT  35
-#define G_BREATH_AMP   70
-#define G_DISTURB_AMP  55
+// 手势幅度 (度, 按 md 范围取值) — 运行时经 STEPS_FOR_DEG 换算为步数
+#define G_DEG_NOD_OPEN     8       // 开机: 轻微仰头
+#define G_DEG_NOD_HAPPY    5       // 开心: 轻微点头
+#define G_DEG_WIG_HAPPY    12      // 开心: 左右摆 (md ±10~15°)
+#define G_DEG_TILT_COMFORT 8       // 安抚: 前倾 (md 5~10°)
+#define G_DEG_TILT_SLEEP   8       // 困倦: 低头 (md 5~10°)
+#define G_DEG_TILT_LOWBAT  5       // 低电: 轻微低头
+#define G_DEG_BREATH       6       // 深呼吸: 前倾幅度
+#define G_DEG_DISTURB      9       // 受扰: (md 8~10°)
+// 速度 (每步延时 ms = MOTOR_STEP_DELAY_MS 倍数)
 #define SP_SLOW   (MOTOR_STEP_DELAY_MS * 5)
 #define SP_NORMAL (MOTOR_STEP_DELAY_MS * 2)
 #define SP_FAST   (MOTOR_STEP_DELAY_MS)
+
+// 调试: 心跳打印间隔 (ms), 0 = 关闭
+#define DBG_HEARTBEAT_MS   5000
 
 static const char* StateName(MoodState s) {
     switch (s) {
@@ -59,6 +63,24 @@ static const char* StateName(MoodState s) {
         case MOOD_DISTURBED: return "DISTURBED";
         case MOOD_LOW_BATTERY: return "LOW_BATTERY";
         case MOOD_NIGHT_LIGHT: return "NIGHT_LIGHT";
+        default: return "?";
+    }
+}
+
+static const char* EventName(MoodEvent e) {
+    switch (e) {
+        case EVT_NONE: return "NONE";
+        case EVT_POWER_ON: return "POWER_ON";
+        case EVT_POWER_OFF: return "POWER_OFF";
+        case EVT_TOUCH_SHORT: return "TOUCH_SHORT";
+        case EVT_TOUCH_HOLD: return "TOUCH_HOLD";
+        case EVT_TOUCH_BOTH_HOLD: return "TOUCH_BOTH_HOLD";
+        case EVT_TOUCH_END: return "TOUCH_END";
+        case EVT_NO_TOUCH_TIMEOUT: return "NO_TOUCH_TIMEOUT";
+        case EVT_RAPID_TOUCH: return "RAPID_TOUCH";
+        case EVT_BATTERY_LOW: return "BATT_LOW";
+        case EVT_BATTERY_OK: return "BATT_OK";
+        case EVT_NIGHT_LIGHT_TOGGLE: return "NIGHT_LIGHT";
         default: return "?";
     }
 }
@@ -109,36 +131,49 @@ void MoodController::Loop() {
 
         switch (state_) {
             case MOOD_POWER_ON:
-                if (in_state >= T_POWER_ON) ChangeState(MOOD_CALM);
+                if (in_state >= T_POWER_ON) { ESP_LOGI(TAG, "timeout POWER_ON done"); ChangeState(MOOD_CALM); }
                 break;
             case MOOD_CALM:
                 if (tick_ms_ - last_touch_ms_ >= NO_TOUCH_SLEEP_MS) {
+                    ESP_LOGI(TAG, "timeout no-touch 10min -> SLEEPY");
                     ChangeState(MOOD_SLEEPY);
                 }
                 break;
             case MOOD_HAPPY:
-                if (in_state >= T_HAPPY) ChangeState(MOOD_CALM);
+                if (in_state >= T_HAPPY) { ESP_LOGI(TAG, "timeout HAPPY"); ChangeState(MOOD_CALM); }
                 break;
             case MOOD_COMFORT:
                 if (comfort_release_ms_ && tick_ms_ - comfort_release_ms_ >= T_COMFORT_REL) {
-                    ChangeState(MOOD_CALM);
+                    ESP_LOGI(TAG, "timeout COMFORT release"); ChangeState(MOOD_CALM);
                 }
                 break;
             case MOOD_DEEP_BREATH:
-                if (in_state >= T_DEEP_BREATH) ChangeState(MOOD_CALM);
+                if (in_state >= T_DEEP_BREATH) { ESP_LOGI(TAG, "timeout DEEP_BREATH"); ChangeState(MOOD_CALM); }
                 break;
             case MOOD_DISTURBED:
-                if (in_state >= T_DISTURBED) ChangeState(MOOD_CALM);
+                if (in_state >= T_DISTURBED) { ESP_LOGI(TAG, "timeout DISTURBED cooldown"); ChangeState(MOOD_CALM); }
                 break;
             case MOOD_OFF:
                 if (!off_requested_ && in_state >= T_OFF_FADE) {
                     off_requested_ = true;
+                    ESP_LOGI(TAG, "OFF fade done -> power off");
                     if (power_) power_->RequestShutdown();
                 }
                 break;
             default:
                 break;
         }
+
+        // 调试心跳: 周期打印状态/触摸/电位器, 便于串口观察
+#if DBG_HEARTBEAT_MS > 0
+        if (tick_ms_ - last_hb_ms_ >= DBG_HEARTBEAT_MS) {
+            last_hb_ms_ = tick_ms_;
+            ESP_LOGI(TAG, "hb state=%s touch[L=%d R=%d] pot[nod=%lu shake=%lu]",
+                     StateName(state_), LeftPressed(), RightPressed(),
+                     motor_ ? motor_->ReadNodPosition() : 0,
+                     motor_ ? motor_->ReadShakePosition() : 0);
+        }
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -160,10 +195,12 @@ void MoodController::OnShortTap(uint32_t now_ms) {
     }
     short_count_++;
     if (short_count_ >= RAPID_COUNT) {
+        ESP_LOGI(TAG, "short tap x%lu -> RAPID", (unsigned long)short_count_);
         short_count_ = 0;
         short_window_ms_ = now_ms;
         HandleEvent(EVT_RAPID_TOUCH);
     } else {
+        ESP_LOGI(TAG, "short tap (5s count=%lu)", (unsigned long)short_count_);
         HandleEvent(EVT_TOUCH_SHORT);
     }
 }
@@ -175,8 +212,8 @@ void MoodController::PollTouch(uint32_t now_ms) {
     bool any = l || r;
 
     // 按下边沿
-    if (l && !prev_left_) { left_ms_ = now_ms; left_hold_fired_ = false; last_touch_ms_ = now_ms; }
-    if (r && !prev_right_) { right_ms_ = now_ms; right_hold_fired_ = false; last_touch_ms_ = now_ms; }
+    if (l && !prev_left_) { left_ms_ = now_ms; left_hold_fired_ = false; last_touch_ms_ = now_ms; ESP_LOGI(TAG, "touch LEFT down"); }
+    if (r && !prev_right_) { right_ms_ = now_ms; right_hold_fired_ = false; last_touch_ms_ = now_ms; ESP_LOGI(TAG, "touch RIGHT down"); }
     if (both && both_ms_ == 0) both_ms_ = now_ms;
     if (!both) { both_ms_ = 0; both_hold_fired_ = false; }
 
@@ -184,25 +221,32 @@ void MoodController::PollTouch(uint32_t now_ms) {
     if (state_ == MOOD_CALM || state_ == MOOD_SLEEPY) {
         if (l && !both && !left_hold_fired_ && now_ms - left_ms_ >= HOLD_ONE_MS) {
             left_hold_fired_ = true;
+            ESP_LOGI(TAG, "touch LEFT hold >=3s");
             HandleEvent(EVT_TOUCH_HOLD);
         }
         if (r && !both && !right_hold_fired_ && now_ms - right_ms_ >= HOLD_ONE_MS) {
             right_hold_fired_ = true;
+            ESP_LOGI(TAG, "touch RIGHT hold >=3s");
             HandleEvent(EVT_TOUCH_HOLD);
         }
         // 双手 ≥5s
         if (both && !both_hold_fired_ && both_ms_ && now_ms - both_ms_ >= HOLD_BOTH_MS) {
             both_hold_fired_ = true;
+            ESP_LOGI(TAG, "touch BOTH hold >=5s");
             HandleEvent(EVT_TOUCH_BOTH_HOLD);
         }
     }
 
     // 松开边沿: 短按
     if (!l && prev_left_) {
-        if (!left_hold_fired_ && now_ms - left_ms_ < SHORT_TAP_MAX_MS) OnShortTap(now_ms);
+        uint32_t dur = now_ms - left_ms_;
+        ESP_LOGI(TAG, "touch LEFT up (dur=%lums)", (unsigned long)dur);
+        if (!left_hold_fired_ && dur < SHORT_TAP_MAX_MS) OnShortTap(now_ms);
     }
     if (!r && prev_right_) {
-        if (!right_hold_fired_ && now_ms - right_ms_ < SHORT_TAP_MAX_MS) OnShortTap(now_ms);
+        uint32_t dur = now_ms - right_ms_;
+        ESP_LOGI(TAG, "touch RIGHT up (dur=%lums)", (unsigned long)dur);
+        if (!right_hold_fired_ && dur < SHORT_TAP_MAX_MS) OnShortTap(now_ms);
     }
 
     // 全部触摸结束
@@ -218,8 +262,9 @@ void MoodController::PollBattery(uint32_t now_ms) {
     if (!power_ || now_ms - last_batt_ms_ < BATT_CHECK_MS) return;
     last_batt_ms_ = now_ms;
     int mv = power_->ReadBatteryMv();
-    if (mv < 1000) return;   // ADC 未就绪/未校准, 跳过
+    if (mv < 1000) { ESP_LOGW(TAG, "batt ADC not ready (mv=%d), skip", mv); return; }
     int pct = power_->ReadBatteryPercent();
+    ESP_LOGI(TAG, "batt: %dmV = %d%%", mv, pct);
     if (!low_batt_ && pct < BATT_LOW_PCT) {
         low_batt_ = true;
         HandleEvent(EVT_BATTERY_LOW);
@@ -231,6 +276,8 @@ void MoodController::PollBattery(uint32_t now_ms) {
 
 // ---- 状态转换 (按 md 状态转换表) ----
 void MoodController::HandleEvent(MoodEvent ev) {
+    ESP_LOGI(TAG, "evt %s @ %s", EventName(ev), StateName(state_));
+
     // 关机 / 低电抢占
     if (ev == EVT_POWER_OFF) { ChangeState(MOOD_OFF); return; }
     if (ev == EVT_BATTERY_LOW && state_ != MOOD_OFF && state_ != MOOD_LOW_BATTERY) {
@@ -278,10 +325,11 @@ void MoodController::HandleEvent(MoodEvent ev) {
 // ---- 状态入场 (RGB + 电机手势) ----
 void MoodController::ChangeState(MoodState s) {
     if (s == state_) return;
+    MoodState prev = state_;
     state_ = s;
     state_enter_ms_ = tick_ms_;
     comfort_release_ms_ = 0;
-    ESP_LOGI(TAG, "state -> %s", StateName(s));
+    ESP_LOGI(TAG, "state: %s -> %s", StateName(prev), StateName(s));
 
     switch (s) {
         case MOOD_OFF:
@@ -328,62 +376,73 @@ void MoodController::ChangeState(MoodState s) {
     }
 }
 
-// ---- 手势脚本 ----
+// ---- 手势脚本 (幅度=度, 经 STEPS_FOR_DEG 换算为步数) ----
 void MoodController::GesturePowerOn() {
     // 从低头位 -> 中立, 轻微仰头再回
+    ESP_LOGI(TAG, "gesture POWER_ON: nod +%d/-2 deg", G_DEG_NOD_OPEN);
+    int16_t up = (int16_t)STEPS_FOR_DEG(G_DEG_NOD_OPEN);
+    int16_t dn = (int16_t)STEPS_FOR_DEG(2);
     GestureStep g[] = {
-        {MOTOR_NOD, G_NOD_OPEN, SP_SLOW},
-        {MOTOR_NOD, -20, SP_SLOW},
+        {MOTOR_NOD, up, SP_SLOW},
+        {MOTOR_NOD, (int16_t)(-dn), SP_SLOW},
     };
     motor_->PlayGesture(g, 2);
 }
 
 void MoodController::GestureHappy() {
-    // 轻微仰头 + 左右摆 1~2 次
+    // 轻微仰头 + 左右摆 1 次 (±12°)
+    ESP_LOGI(TAG, "gesture HAPPY: nod ±%d deg, wiggle ±%d deg", G_DEG_NOD_HAPPY, G_DEG_WIG_HAPPY);
+    int16_t nod = (int16_t)STEPS_FOR_DEG(G_DEG_NOD_HAPPY);
+    int16_t wig = (int16_t)STEPS_FOR_DEG(G_DEG_WIG_HAPPY);
     GestureStep g[] = {
-        {MOTOR_NOD, G_NOD_HAPPY, SP_NORMAL},
-        {MOTOR_NOD, -G_NOD_HAPPY, SP_NORMAL},
-        {MOTOR_SHAKE, G_WIG_HAPPY, SP_NORMAL},
-        {MOTOR_SHAKE, -G_WIG_HAPPY, SP_NORMAL},
-        {MOTOR_SHAKE, G_WIG_HAPPY, SP_NORMAL},
-        {MOTOR_SHAKE, -G_WIG_HAPPY, SP_NORMAL},
+        {MOTOR_NOD, nod, SP_NORMAL},
+        {MOTOR_NOD, (int16_t)(-nod), SP_NORMAL},
+        {MOTOR_SHAKE, wig, SP_NORMAL},
+        {MOTOR_SHAKE, (int16_t)(-wig), SP_NORMAL},
     };
-    motor_->PlayGesture(g, 6);
+    motor_->PlayGesture(g, 4);
 }
 
 void MoodController::GestureComfort() {
     // 缓慢前倾 (倾听姿态), 保持
-    GestureStep g[] = { {MOTOR_NOD, G_TILT_COMFORT, SP_SLOW} };
+    ESP_LOGI(TAG, "gesture COMFORT: tilt +%d deg", G_DEG_TILT_COMFORT);
+    GestureStep g[] = { {MOTOR_NOD, (int16_t)STEPS_FOR_DEG(G_DEG_TILT_COMFORT), SP_SLOW} };
     motor_->PlayGesture(g, 1);
 }
 
 void MoodController::GestureDeepBreath() {
     // 极缓慢前倾 -> 回中, 2 次循环 (与呼吸灯近似同步)
+    ESP_LOGI(TAG, "gesture DEEP_BREATH: ±%d deg x2", G_DEG_BREATH);
+    int16_t amp = (int16_t)STEPS_FOR_DEG(G_DEG_BREATH);
     GestureStep g[] = {
-        {MOTOR_NOD, G_BREATH_AMP, SP_SLOW},
-        {MOTOR_NOD, -G_BREATH_AMP, SP_SLOW},
-        {MOTOR_NOD, G_BREATH_AMP, SP_SLOW},
-        {MOTOR_NOD, -G_BREATH_AMP, SP_SLOW},
+        {MOTOR_NOD, amp, SP_SLOW},
+        {MOTOR_NOD, (int16_t)(-amp), SP_SLOW},
+        {MOTOR_NOD, amp, SP_SLOW},
+        {MOTOR_NOD, (int16_t)(-amp), SP_SLOW},
     };
     motor_->PlayGesture(g, 4);
 }
 
 void MoodController::GestureSleepy() {
-    GestureStep g[] = { {MOTOR_NOD, G_TILT_SLEEP, SP_SLOW} };
+    ESP_LOGI(TAG, "gesture SLEEPY: tilt +%d deg", G_DEG_TILT_SLEEP);
+    GestureStep g[] = { {MOTOR_NOD, (int16_t)STEPS_FOR_DEG(G_DEG_TILT_SLEEP), SP_SLOW} };
     motor_->PlayGesture(g, 1);
 }
 
 void MoodController::GestureDisturbed() {
     // 快速低头 + 歪头
+    ESP_LOGI(TAG, "gesture DISTURBED: nod -%d, wiggle ±%d deg", G_DEG_DISTURB, G_DEG_DISTURB);
+    int16_t amp = (int16_t)STEPS_FOR_DEG(G_DEG_DISTURB);
     GestureStep g[] = {
-        {MOTOR_NOD, -G_DISTURB_AMP, SP_FAST},
-        {MOTOR_SHAKE, G_DISTURB_AMP, SP_FAST},
-        {MOTOR_SHAKE, -G_DISTURB_AMP, SP_FAST},
+        {MOTOR_NOD, (int16_t)(-amp), SP_FAST},
+        {MOTOR_SHAKE, amp, SP_FAST},
+        {MOTOR_SHAKE, (int16_t)(-amp), SP_FAST},
     };
     motor_->PlayGesture(g, 3);
 }
 
 void MoodController::GestureLowBattery() {
-    GestureStep g[] = { {MOTOR_NOD, G_TILT_LOWBAT, SP_SLOW} };
+    ESP_LOGI(TAG, "gesture LOW_BATT: tilt +%d deg", G_DEG_TILT_LOWBAT);
+    GestureStep g[] = { {MOTOR_NOD, (int16_t)STEPS_FOR_DEG(G_DEG_TILT_LOWBAT), SP_SLOW} };
     motor_->PlayGesture(g, 1);
 }

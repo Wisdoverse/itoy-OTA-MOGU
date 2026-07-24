@@ -98,6 +98,9 @@ private:
     uint32_t last_batt_ms_ = 0;
     bool low_batt_ = false;
 
+    // 调试心跳
+    uint32_t last_hb_ms_ = 0;
+
     // 关机流程
     bool off_requested_ = false;
 };

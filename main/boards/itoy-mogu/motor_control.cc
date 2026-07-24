@@ -285,10 +285,13 @@ void MotorControl::PlayGesture(const GestureStep* steps, int n) {
     gesture_remaining_ = std::abs((int)gesture_[0].steps);
     gesture_active_ = true;
     gesture_done_ = false;
+    ESP_LOGI(TAG, "gesture play: %d segs (seg0: motor%d steps%d %dms)",
+             len, (int)gesture_[0].motor, (int)gesture_[0].steps, (int)gesture_[0].delay_ms);
     xSemaphoreGive(step_mutex_);
 }
 
 void MotorControl::StopGesture() {
+    ESP_LOGI(TAG, "gesture stop");
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     gesture_active_ = false;
     gesture_done_ = true;
@@ -319,6 +322,8 @@ void MotorControl::Home() {
             n++;
         }
     }
+    ESP_LOGI(TAG, "home: motor0 %d steps, motor1 % d steps",
+             (int)script[0].steps, n > 1 ? (int)script[1].steps : 0);
     PlayGesture(script, n);
 }
 
