@@ -11,7 +11,30 @@
 #include <wifi_configuration_ap.h>
 #include <ssid_manager.h>
 
+#if CONFIG_ITOY_PROVISIONING_BLE
+#include "wifi_provisioning_ble.h"
+#endif
+
 static const char *TAG = "WifiBoard";
+
+// 按 Kconfig 配网方式分发
+void WifiBoard::EnterConfigMode() {
+#if CONFIG_ITOY_PROVISIONING_BLE
+    EnterBleProvisioningMode();
+#else
+    EnterWifiConfigMode();
+#endif
+}
+
+void WifiBoard::EnterBleProvisioningMode() {
+#if CONFIG_ITOY_PROVISIONING_BLE
+    ESP_LOGI(TAG, "Entering BLE provisioning mode");
+    WifiProvisioningBle prov;
+    prov.Start();   // 阻塞; 成功后内部 esp_restart
+#else
+    EnterWifiConfigMode();   // 未启用 BLE, 回退 SoftAP
+#endif
+}
 
 WifiBoard::WifiBoard() {
     Settings settings("wifi", true);
@@ -42,7 +65,7 @@ void WifiBoard::EnterWifiConfigMode() {
 
 void WifiBoard::StartNetwork() {
     if (wifi_config_mode_) {
-        EnterWifiConfigMode();
+        EnterConfigMode();
         return;
     }
     ESP_LOGI(TAG, "Starting WiFi in station mode...");
@@ -51,7 +74,7 @@ void WifiBoard::StartNetwork() {
     auto ssid_list = ssid_manager.GetSsidList();
     if (ssid_list.empty()) {
         wifi_config_mode_ = true;
-        EnterWifiConfigMode();
+        EnterConfigMode();
         return;
     }
 
@@ -62,7 +85,7 @@ void WifiBoard::StartNetwork() {
         wifi_station.Stop();
         wifi_config_mode_ = true;
         ESP_LOGI(TAG, "Failed to connect to WiFi, entering config mode");
-        EnterWifiConfigMode();
+        EnterConfigMode();
         return;
     }
 

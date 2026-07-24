@@ -6,7 +6,9 @@
 class WifiBoard : public Board {
 protected:
     bool wifi_config_mode_ = false;
-    void EnterWifiConfigMode();
+    void EnterConfigMode();              // 按 Kconfig 选 SoftAP 或 BLE
+    void EnterWifiConfigMode();          // SoftAP + 网页配网
+    void EnterBleProvisioningMode();     // 蓝牙 BLE 配网 (CONFIG_ITOY_PROVISIONING_BLE)
     virtual std::string GetBoardJson() override;
 
 public:

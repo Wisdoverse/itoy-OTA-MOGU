@@ -12,23 +12,27 @@ config BOARD_TYPE_ITOY_WIFI_LCD
     bool
     default y
 
-# itoy SD 卡配置
-choice ITOY_WIFI_LCD_SD_TYPE
-    prompt "SD 卡接口类型"
-    default ITOY_WIFI_LCD_SD_NONE
+# WiFi 配网方式 (build-time 选择)
+choice ITOY_PROVISIONING_METHOD
+    prompt "WiFi 配网方式"
+    default ITOY_PROVISIONING_AP
     help
-        选择 itoy 开发板的 SD 卡接口方式。
-        不使用 SD 卡可节省 GPIO 资源。
+        选择首次配网方式。设备已存有 WiFi 凭据时直接连接，不进入配网。
+        仅编译被选中的方式。
 
-    config ITOY_WIFI_LCD_SD_NONE
-        bool "不使用 SD 卡"
+    config ITOY_PROVISIONING_AP
+        bool "SoftAP + 网页配网 (默认)"
+        help
+            设备开启热点 Itoy-XXXX，手机连该热点后访问网页输入 WiFi 密码。
 
-    config ITOY_WIFI_LCD_SD_CARD
-        bool "SD 卡 (SDMMC 模式，高速)"
-
-    config ITOY_WIFI_LCD_SPI_SD
-        bool "SPI SD 卡 (SDSPI 模式，低速)"
-
+    config ITOY_PROVISIONING_BLE
+        bool "蓝牙 BLE 配网 (ESP BLE Provisioning App)"
+        select BT_ENABLED
+        help
+            用蓝牙配网。手机用 Espressif "ESP BLE Provisioning" App 扫描
+            Itoy-XXXX，输入 PoP 并选择 WiFi 输入密码。
+            会开启蓝牙栈 (Bluedroid, 约 +200~400KB flash)。
+            注: BT 主机用 ESP-IDF 默认 (S3 = Bluedroid, 兼容 protocomm BLE)。
 endchoice
 
 # itoy-mogu RGB 灯带配置

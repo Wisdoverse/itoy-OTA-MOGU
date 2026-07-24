@@ -26,7 +26,7 @@ list(APPEND SOURCES ${BOARD_SOURCES})
 
 idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
-                    REQUIRES driver app_update spi_flash nvs_flash efuse esp_app_format esp_adc led_strip
+                    REQUIRES driver app_update spi_flash nvs_flash efuse esp_app_format esp_adc led_strip wifi_provisioning
                     WHOLE_ARCHIVE
                     )
 
