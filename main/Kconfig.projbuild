@@ -28,11 +28,14 @@ choice ITOY_PROVISIONING_METHOD
     config ITOY_PROVISIONING_BLE
         bool "蓝牙 BLE 配网 (ESP BLE Provisioning App)"
         select BT_ENABLED
+        select BT_BLE_42_FEATURES_SUPPORTED
         help
             用蓝牙配网。手机用 Espressif "ESP BLE Provisioning" App 扫描
             Itoy-XXXX，输入 PoP 并选择 WiFi 输入密码。
             会开启蓝牙栈 (Bluedroid, 约 +200~400KB flash)。
             注: BT 主机用 ESP-IDF 默认 (S3 = Bluedroid, 兼容 protocomm BLE)。
+            select BT_BLE_42_FEATURES_SUPPORTED 是因为 protocomm 的 simple_ble
+            用传统(4.2)广播 API (esp_ble_gap_config_adv_data / start_advertising)。
 endchoice
 
 # itoy-mogu RGB 灯带配置
