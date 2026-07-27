@@ -1,6 +1,7 @@
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
+#include "sdkconfig.h"   // CONFIG_ITOY_ENABLE_* / CONFIG_ITOY_PROVISIONING_* 等
 #include <driver/gpio.h>
 #include <driver/adc.h>
 

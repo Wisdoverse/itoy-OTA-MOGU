@@ -46,4 +46,25 @@ config ITOY_RGB_LED_COUNT
         连接在 GPIO38 (U13 连接器 DIN) 的 WS2812B 灯带灯珠数量。
         根据实际灯带长度在 menuconfig 中修改。
 
+config ITOY_ENABLE_MOTOR
+    bool "启用电机驱动 (点头/摇头步进 + 情绪手势)"
+    default y
+    help
+        关闭则完全不初始化电机、不跑情绪里的电机手势
+        (适合裸板调试 / 无电机时, 也省 ADC)。
+
+config ITOY_ENABLE_MOTOR_TEST
+    bool "启用电机自检代码 (开机跑一次测试动作)"
+    default n
+    depends on ITOY_ENABLE_MOTOR
+    help
+        开机后让两个电机各正反转一小段并打印电位器读数,
+        用于验证电机 / 电位器接线。仅在启用电机时可用。
+
+config ITOY_ENABLE_IMU
+    bool "启用 IMU (QMI8658A)"
+    default y
+    help
+        关闭则跳过 IMU 初始化 (裸板无 IMU 时关掉, 避免无谓 I2C 探测)。
+
 endmenu

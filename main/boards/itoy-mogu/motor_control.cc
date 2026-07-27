@@ -291,6 +291,7 @@ void MotorControl::PlayGesture(const GestureStep* steps, int n) {
 }
 
 void MotorControl::StopGesture() {
+    if (!initialized_) return;   // 未初始化 (电机被 menuconfig 关闭) 时安全跳过
     ESP_LOGI(TAG, "gesture stop");
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     gesture_active_ = false;
@@ -366,17 +367,21 @@ void MotorControl::MoveToPercent(MotorId id, int percent) {
 }
 
 uint32_t MotorControl::ReadNodPosition() {
+    if (!initialized_) return 0;
     return motors_[MOTOR_NOD]->ReadPotentiometer();
 }
 
 uint32_t MotorControl::ReadShakePosition() {
+    if (!initialized_) return 0;
     return motors_[MOTOR_SHAKE]->ReadPotentiometer();
 }
 
 float MotorControl::ReadNodPositionNorm() {
+    if (!initialized_) return 0.0f;
     return motors_[MOTOR_NOD]->ReadPosition();
 }
 
 float MotorControl::ReadShakePositionNorm() {
+    if (!initialized_) return 0.0f;
     return motors_[MOTOR_SHAKE]->ReadPosition();
 }
