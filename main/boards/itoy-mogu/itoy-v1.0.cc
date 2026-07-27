@@ -3,6 +3,9 @@
 #include "touch_pad.h"
 #include "motor_control.h"
 #include "power_control.h"
+#if CONFIG_ITOY_ENABLE_MOTOR_TEST
+#include "stepper_motor.h"
+#endif
 #if CONFIG_ITOY_ENABLE_IMU
 #include "imu_qmi8658a.h"
 #endif
@@ -33,10 +36,13 @@ public:
         // 1. 电源控制 (必须最先: 锁存供电)
         power_.Initialize();
 
-        // 2. 电机控制 (创建共享 ADC + 电机, 含电池通道)
-#if CONFIG_ITOY_ENABLE_MOTOR
+        // 2. 电机: 测试模式走串口命令 stepper_motor (不使用电位器, 独占 GPIO);
+        //       否则正常 MotorControl (含共享 ADC + 电池通道)
+#if CONFIG_ITOY_ENABLE_MOTOR_TEST
+        StepperTestStart();
+#elif CONFIG_ITOY_ENABLE_MOTOR
         motor_.Initialize();
-        // 3. 电池 ADC 共享句柄 (ADC 单元由电机模块创建, 关电机则无电池采集)
+        // 电池 ADC 共享句柄 (ADC 单元由电机模块创建, 关电机则无电池采集)
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
 #endif
 
@@ -46,20 +52,9 @@ public:
         // 5. 触摸面板 (供 MoodController 轮询 IsPressed)
         touch_.Initialize();
 
-#if CONFIG_ITOY_ENABLE_MOTOR
-        // 6. 启动电机任务 (消费手势/驱动)
+#if CONFIG_ITOY_ENABLE_MOTOR && !CONFIG_ITOY_ENABLE_MOTOR_TEST
+        // 6. 启动电机任务 (消费手势/驱动); 测试模式已由 stepper_motor 独占, 不启动此项
         motor_.StartMotorTask();
-
-    #if CONFIG_ITOY_ENABLE_MOTOR_TEST
-        // 电机自检: 两电机各正反转一小段, 打印电位器 (验证接线)
-        ESP_LOGI(TAG, "=== 电机自检开始 ===");
-        motor_.NodSteps(STEPS_FOR_DEG(10));    vTaskDelay(pdMS_TO_TICKS(300));
-        motor_.NodSteps(-STEPS_FOR_DEG(10));   vTaskDelay(pdMS_TO_TICKS(300));
-        motor_.ShakeSteps(STEPS_FOR_DEG(15));  vTaskDelay(pdMS_TO_TICKS(300));
-        motor_.ShakeSteps(-STEPS_FOR_DEG(15));
-        ESP_LOGI(TAG, "=== 电机自检完成: nod=%lu shake=%lu ===",
-                 motor_.ReadNodPosition(), motor_.ReadShakePosition());
-    #endif
 #endif
 
         // 7. 情绪状态机 (消费触摸, 驱动 RGB + 电机手势), 自动进入 POWER_ON
@@ -67,7 +62,9 @@ public:
         mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
         mood_.Start();
 
-#if CONFIG_ITOY_ENABLE_MOTOR
+#if CONFIG_ITOY_ENABLE_MOTOR_TEST
+        ESP_LOGI(TAG, "RGB=%dLEDs, 电机测试模式 (stepper_motor, 不用电位器)", rgb_.count());
+#elif CONFIG_ITOY_ENABLE_MOTOR
         ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV, RGB=%dLEDs",
                  motor_.ReadNodPosition(), motor_.ReadShakePosition(),
                  power_.ReadBatteryMv(), rgb_.count());

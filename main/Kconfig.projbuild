@@ -54,12 +54,22 @@ config ITOY_ENABLE_MOTOR
         (适合裸板调试 / 无电机时, 也省 ADC)。
 
 config ITOY_ENABLE_MOTOR_TEST
-    bool "启用电机自检代码 (开机跑一次测试动作)"
+    bool "启用电机测试代码 (串口命令驱动, 不使用电位器)"
     default n
-    depends on ITOY_ENABLE_MOTOR
     help
-        开机后让两个电机各正反转一小段并打印电位器读数,
-        用于验证电机 / 电位器接线。仅在启用电机时可用。
+        启动步进电机串口命令测试 (stepper_motor 模块), 复用 UART0 / USB 串口
+        (115200, 同一终端看日志 + 发命令):
+          A <步数> [延时ms]   电机A(点头) 正(+)反(-)
+          B <步数> [延时ms]   电机B(摇头) 正(+)反(-)
+          O                   两电机断电
+          H                   帮助
+
+        重要: 本测试为纯 GPIO 半步驱动, **不使用电位器 / ADC / 软限位**,
+        无需连接电位器即可验证电机接线; 也不读位置、不防堵转, 注意控制步数
+        避免机械顶死。
+
+        启用后由 stepper_motor 独占电机 GPIO, 跳过正常的 MotorControl +
+        情绪电机手势 (与 ITOY_ENABLE_MOTOR 互斥; 两者都开时以测试为准)。
 
 config ITOY_ENABLE_IMU
     bool "启用 IMU (QMI8658A)"
