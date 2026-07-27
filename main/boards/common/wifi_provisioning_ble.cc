@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <esp_event.h>
 #include <esp_wifi.h>
+#include <esp_netif.h>
 #include <esp_mac.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
@@ -68,6 +69,14 @@ void WifiProvisioningBle::Start() {
     // 注册配网事件
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID,
                                                ProvEventHandler, NULL));
+
+    // WiFi 底层初始化 (wifi_prov_mgr 不代劳: netif + esp_wifi_init 必须先建好,
+    // 否则 wifi_prov_mgr_start_provisioning 报 ESP_ERR_WIFI_NOT_INIT)
+    esp_netif_init();   // 若上层已初始化会返回 INVALID_STATE, 忽略
+    esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
+    wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
 
     // BLE scheme: 配网结束后释放 BT 资源 (本设备仅配网时用 BT, 省内存)
     wifi_prov_mgr_config_t cfg = {
