@@ -73,8 +73,8 @@
 #define POWER_LATCH_GPIO    GPIO_NUM_42   // ON 锁存信号, 拉低触发软关机
 
 // --- 电机1: 点头 U17 (前后) via U9 ---
-#define MOTOR_NOD_A_GPIO    GPIO_NUM_41
-#define MOTOR_NOD_B_GPIO    GPIO_NUM_40
+#define MOTOR_NOD_A_GPIO    GPIO_NUM_40
+#define MOTOR_NOD_B_GPIO    GPIO_NUM_41
 #define MOTOR_NOD_C_GPIO    GPIO_NUM_48
 #define MOTOR_NOD_D_GPIO    GPIO_NUM_47
 #define MOTOR_NOD_INVERT    0   // 1 = 翻转正/负方向 (装机方向不对时改这里)
@@ -98,31 +98,5 @@
 // 1 = 增大, 0 = 减小。实测若软限位在刚起步就立即触发, 把对应项取反
 #define MOTOR_NOD_POT_CW_INC   1
 #define MOTOR_SHAKE_POT_CW_INC 1
-
-// ============================================================
-// 电机测试模块 (stepper_motor.*), 仅 CONFIG_ITOY_ENABLE_MOTOR_TEST 时编译
-// 注意: 该模块纯 GPIO 半步驱动, 不使用电位器 / ADC / 软限位
-// ============================================================
-#if CONFIG_ITOY_ENABLE_MOTOR_TEST
-#include <driver/uart.h>
-
-#define MOTOR_A_IN1_GPIO       MOTOR_NOD_A_GPIO     // 电机A = 点头
-#define MOTOR_A_IN2_GPIO       MOTOR_NOD_B_GPIO
-#define MOTOR_A_IN3_GPIO       MOTOR_NOD_C_GPIO
-#define MOTOR_A_IN4_GPIO       MOTOR_NOD_D_GPIO
-#define MOTOR_B_IN1_GPIO       MOTOR_SHAKE_A_GPIO   // 电机B = 摇头
-#define MOTOR_B_IN2_GPIO       MOTOR_SHAKE_B_GPIO
-#define MOTOR_B_IN3_GPIO       MOTOR_SHAKE_C_GPIO
-#define MOTOR_B_IN4_GPIO       MOTOR_SHAKE_D_GPIO
-
-#define MOTOR_CMD_UART_NUM     UART_NUM_0           // 复用 USB 串口收命令
-#define MOTOR_CMD_UART_RX_BUF  256
-#define MOTOR_STEP_DELAY_US    2000                 // 每半步 2ms (越小越快)
-#define MOTOR_SELFTEST_ENABLE  0                    // 开机自测(摆动)关; 用串口命令测
-#define MOTOR_SELFTEST_STEPS   512
-#define MOTOR_SELFTEST_DURATION_MS 60000
-#define MOTOR_SELFTEST_PAUSE_MS     500
-#define MOTOR_TASK_STACK_SIZE  3072
-#endif
 
 #endif // _BOARD_CONFIG_H_

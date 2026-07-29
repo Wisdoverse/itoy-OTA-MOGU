@@ -53,23 +53,28 @@ config ITOY_ENABLE_MOTOR
         关闭则完全不初始化电机、不跑情绪里的电机手势
         (适合裸板调试 / 无电机时, 也省 ADC)。
 
-config ITOY_ENABLE_MOTOR_TEST
-    bool "启用电机测试代码 (串口命令驱动, 不使用电位器)"
+config ITOY_ENABLE_DEBUG_MODE
+    bool "启用调试测试模式 (WiFi 热点 + 网页调试, 关闭不影响主程序)"
     default n
     help
-        启动步进电机串口命令测试 (stepper_motor 模块), 复用 UART0 / USB 串口
-        (115200, 同一终端看日志 + 发命令):
-          A <步数> [延时ms]   电机A(点头) 正(+)反(-)
-          B <步数> [延时ms]   电机B(摇头) 正(+)反(-)
-          O                   两电机断电
-          H                   帮助
+        开机进入调试模式: 起一个 WiFi 热点 Itoy-Debug-XXXX, 手机/电脑连上后
+        浏览器访问 http://192.168.4.1 打开调试网页:
+          - 控制电机 (点头/摇头 正反转, 步数可调)
+          - 实时显示电位器 (nod/shake) 读数
+          - 实时显示电池电压 / 电量
+          - 串口日志 (ESP_LOG) 实时流
 
-        重要: 本测试为纯 GPIO 半步驱动, **不使用电位器 / ADC / 软限位**,
-        无需连接电位器即可验证电机接线; 也不读位置、不防堵转, 注意控制步数
-        避免机械顶死。
+        启用后跳过正常配网与情绪状态机, 专用调试 (复用 MotorControl +
+        PowerControl)。关闭则完全不影响主程序。
 
-        启用后由 stepper_motor 独占电机 GPIO, 跳过正常的 MotorControl +
-        情绪电机手势 (与 ITOY_ENABLE_MOTOR 互斥; 两者都开时以测试为准)。
+        注: WiFi 发射有电流尖峰, 供电不足会 brownout (裸板需能撑住 WiFi 的电源)。
+
+config ITOY_DEBUG_AP_PASSWORD
+    string "调试热点密码 (留空 = 开放热点)"
+    default ""
+    depends on ITOY_ENABLE_DEBUG_MODE
+    help
+        调试热点的 WPA2 密码; 留空则开放 (无密码), 方便调试。
 
 config ITOY_ENABLE_IMU
     bool "启用 IMU (QMI8658A)"
