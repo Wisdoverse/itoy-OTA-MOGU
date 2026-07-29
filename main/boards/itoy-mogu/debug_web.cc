@@ -79,7 +79,9 @@ static const char kIndexHtml[] =
 "#log{width:100%;height:240px;font-family:monospace;font-size:12px}"
 ".b{display:inline-block;width:90px}</style></head><body>"
 "<h2>电机控制</h2>"
-"步数:<input id='steps' type='number' value='512' size='6'>"
+"步数:<input id='steps' type='number' value='1024' size='6'>"
+" ms/步:<input id='delay' type='number' value='4' size='4' min='1' max='20'>"
+"(不转就调大, 如 6/8)"
 "<br><button onclick=mv('a',1)>点头 +</button>"
 "<button onclick=mv('a',-1)>点头 −</button>"
 "<button class=b></button>"
@@ -96,9 +98,10 @@ static const char kIndexHtml[] =
 "async function log(){try{let r=await fetch('/api/log');"
 "let t=await r.text();let e=document.getElementById('log');"
 "e.value=t;e.scrollTop=e.scrollHeight;}catch(e){}}"
-"async function mv(m,d){let s=parseInt(document.getElementById('steps').value)||0;"
+"async function mv(m,dir){let s=parseInt(document.getElementById('steps').value)||0;"
+"let dl=parseInt(document.getElementById('delay').value)||4;"
 "if(Math.abs(s)>2000){alert('步数限制 2000');return;}"
-"await fetch('/api/motor?m='+m+'&dir='+d+'&steps='+s);}"
+"await fetch('/api/motor?m='+m+'&dir='+dir+'&steps='+s+'&delay='+dl);}"
 "state();log();setInterval(state,1000);setInterval(log,1000);"
 "</script></body></html>";
 
@@ -138,19 +141,22 @@ static esp_err_t handle_motor(httpd_req_t* req) {
         return ESP_OK;
     }
     char motor = 'a';
-    int dir = 1, steps = 0;
+    int dir = 1, steps = 0, delay_ms = 4;
     if (httpd_query_key_value(query, "m", val, sizeof(val)) == ESP_OK) motor = val[0];
     if (httpd_query_key_value(query, "dir", val, sizeof(val)) == ESP_OK) dir = atoi(val);
     if (httpd_query_key_value(query, "steps", val, sizeof(val)) == ESP_OK) steps = atoi(val);
+    if (httpd_query_key_value(query, "delay", val, sizeof(val)) == ESP_OK) delay_ms = atoi(val);
     if (steps > 2000) steps = 2000;
     if (steps < -2000) steps = -2000;
+    if (delay_ms < 1) delay_ms = 4;
+    if (delay_ms > 20) delay_ms = 20;
 
     int eff = dir >= 0 ? steps : -steps;
-    ESP_LOGI(TAG, "motor %c dir=%d steps=%d (eff=%d) raw/3ms", motor, dir, steps, eff);
+    ESP_LOGI(TAG, "motor %c dir=%d steps=%d delay=%dms (eff=%d)", motor, dir, steps, delay_ms, eff);
     if (s_motor) {
-        // 调试用原始步进: 不走电位器软限位, 3ms/步 (裸板无电位器也能转)
-        if (motor == 'a') s_motor->MoveSteps(MOTOR_NOD, eff);
-        else              s_motor->MoveSteps(MOTOR_SHAKE, eff);
+        // 调试用原始步进: 不走电位器软限位, 带加速斜坡; delay 可调
+        if (motor == 'a') s_motor->MoveSteps(MOTOR_NOD, eff, delay_ms);
+        else              s_motor->MoveSteps(MOTOR_SHAKE, eff, delay_ms);
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);

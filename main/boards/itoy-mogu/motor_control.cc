@@ -121,9 +121,19 @@ void StepperMotor::StepRaw(int steps, int delay_ms) {
     if (delay_ms < 1) delay_ms = step_delay_ms_;
     bool clockwise = steps >= 0;
     int abs_steps = std::abs(steps);
+
+    // 加速斜坡: 起步用 2 倍慢速让转子跟上, 前 80 步线性加速到目标速度。
+    // 没有斜坡时, 从静止直接给目标速度, 28BYJ-48 容易打滑只抖不转。
+    int cruise = delay_ms;
+    int start = cruise * 2;
+    if (start > 20) start = 20;
+    int ramp_n = abs_steps < 80 ? abs_steps : 80;
+
     for (int i = 0; i < abs_steps; i++) {
         AdvancePhase(clockwise);                  // 不读电位器, 不软限位
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        int d = (i < ramp_n) ? (start - (start - cruise) * i / (ramp_n > 0 ? ramp_n : 1))
+                             : cruise;
+        vTaskDelay(pdMS_TO_TICKS(d));
     }
 }
 
@@ -352,12 +362,12 @@ void MotorControl::ShakeSteps(int steps) {
     xSemaphoreGive(step_mutex_);
 }
 
-void MotorControl::MoveSteps(MotorId id, int steps) {
+void MotorControl::MoveSteps(MotorId id, int steps, int delay_ms) {
     if (!initialized_ || id < 0 || id >= MOTOR_COUNT) return;
-    // 调试用: 不走电位器软限位, 3ms/步 (333pps) 比 2ms 更可靠,
-    // 28BYJ-48 从静止直接 500pps(2ms) 容易只抖不转。
+    if (delay_ms < 1) delay_ms = 3;
+    // 调试用: 不走电位器软限位, 带加速斜坡; delay_ms 由调用方(网页)决定
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
-    motors_[id]->StepRaw(steps, 3);
+    motors_[id]->StepRaw(steps, delay_ms);
     xSemaphoreGive(step_mutex_);
 }
 

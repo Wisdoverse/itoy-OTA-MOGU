@@ -105,8 +105,8 @@ public:
     // ---- 手势 API (阻塞, 供应用层 / AI 后续调用) ----
     void NodSteps(int steps);
     void ShakeSteps(int steps);
-    // 调试用原始步进: 不走电位器软限位, 3ms/步 (裸板/无电位器时验证电机是否转)
-    void MoveSteps(MotorId id, int steps);
+    // 调试用原始步进: 不走电位器软限位, 带加速斜坡; delay_ms=每步巡航延时
+    void MoveSteps(MotorId id, int steps, int delay_ms = 3);
     // 步进到目标电位器百分比 (0~100), 带最大步数保护
     void MoveToPercent(MotorId id, int percent);
 
