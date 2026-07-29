@@ -117,6 +117,16 @@ void StepperMotor::RotateRevolutions(float revolutions) {
     RotateDegrees(revolutions * 360.0f);
 }
 
+void StepperMotor::StepRaw(int steps, int delay_ms) {
+    if (delay_ms < 1) delay_ms = step_delay_ms_;
+    bool clockwise = steps >= 0;
+    int abs_steps = std::abs(steps);
+    for (int i = 0; i < abs_steps; i++) {
+        AdvancePhase(clockwise);                  // 不读电位器, 不软限位
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+}
+
 void StepperMotor::SetSpeed(int delay_ms) {
     if (delay_ms < 1) delay_ms = 1;
     step_delay_ms_ = delay_ms;
@@ -339,6 +349,15 @@ void MotorControl::ShakeSteps(int steps) {
     if (!initialized_) return;
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     motors_[MOTOR_SHAKE]->Step(steps);
+    xSemaphoreGive(step_mutex_);
+}
+
+void MotorControl::MoveSteps(MotorId id, int steps) {
+    if (!initialized_ || id < 0 || id >= MOTOR_COUNT) return;
+    // 调试用: 不走电位器软限位, 3ms/步 (333pps) 比 2ms 更可靠,
+    // 28BYJ-48 从静止直接 500pps(2ms) 容易只抖不转。
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    motors_[id]->StepRaw(steps, 3);
     xSemaphoreGive(step_mutex_);
 }
 

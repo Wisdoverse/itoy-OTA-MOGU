@@ -30,6 +30,10 @@ public:
     void RotateDegrees(float degrees);
     void RotateRevolutions(float revolutions);
 
+    // 原始步进: 不走电位器软限位、不自定义速度, 指定每步延时 (调试/裸板用)
+    // 适合没接电位器、或想验证电机本身是否转的场景
+    void StepRaw(int steps, int delay_ms);
+
     // 带软限位的单步 (供驱动任务/手势调用), 返回是否真的走了
     bool StepOnceLimited(bool clockwise);
 
@@ -101,6 +105,8 @@ public:
     // ---- 手势 API (阻塞, 供应用层 / AI 后续调用) ----
     void NodSteps(int steps);
     void ShakeSteps(int steps);
+    // 调试用原始步进: 不走电位器软限位, 3ms/步 (裸板/无电位器时验证电机是否转)
+    void MoveSteps(MotorId id, int steps);
     // 步进到目标电位器百分比 (0~100), 带最大步数保护
     void MoveToPercent(MotorId id, int percent);
 

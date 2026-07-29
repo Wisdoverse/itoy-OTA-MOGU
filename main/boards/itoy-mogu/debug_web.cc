@@ -146,10 +146,11 @@ static esp_err_t handle_motor(httpd_req_t* req) {
     if (steps < -2000) steps = -2000;
 
     int eff = dir >= 0 ? steps : -steps;
-    ESP_LOGI(TAG, "motor %c dir=%d steps=%d (eff=%d)", motor, dir, steps, eff);
+    ESP_LOGI(TAG, "motor %c dir=%d steps=%d (eff=%d) raw/3ms", motor, dir, steps, eff);
     if (s_motor) {
-        if (motor == 'a') s_motor->NodSteps(eff);
-        else              s_motor->ShakeSteps(eff);
+        // 调试用原始步进: 不走电位器软限位, 3ms/步 (裸板无电位器也能转)
+        if (motor == 'a') s_motor->MoveSteps(MOTOR_NOD, eff);
+        else              s_motor->MoveSteps(MOTOR_SHAKE, eff);
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
