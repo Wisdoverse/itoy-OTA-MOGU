@@ -15,11 +15,17 @@
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_http_server.h>
+#include <lwip/sockets.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 
 #define TAG "DebugWeb"
+
+// 调试 AP 的 IP (192.168.4.1) —— 同时用于 DNS 劫持 (captive portal 自动弹页)
+static const uint8_t kApIp[4] = {192, 168, 4, 1};
 
 // ---- 文件级上下文 ----
 static MotorControl* s_motor = nullptr;
@@ -105,6 +111,13 @@ static esp_err_t handle_root(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// 通配: 任何非 /api/* 的 GET 都返回网页 (captive portal 探测路径也命中 -> 自动弹页)
+static esp_err_t handle_catchall(httpd_req_t* req) {
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_send(req, kIndexHtml, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 static esp_err_t handle_state(httpd_req_t* req) {
     char json[160];
     snprintf(json, sizeof(json),
@@ -152,6 +165,44 @@ static esp_err_t handle_log(httpd_req_t* req) {
 }
 
 // =====================================================================
+// DNS 劫持 (captive portal): 所有域名都解析到 192.168.4.1
+// 手机连上热点后会探测联网(如 captive.apple.com / generate_204), 经此劫持
+// 都打到本机 HTTP, 返回的不是预期响应 -> 系统判定为"需登录" -> 自动弹出网页
+// =====================================================================
+static void DnsTask(void* /*arg*/) {
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) { ESP_LOGE(TAG, "dns socket fail"); vTaskDelete(NULL); return; }
+    struct sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(53);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "dns bind fail"); close(sock); vTaskDelete(NULL); return;
+    }
+    ESP_LOGI(TAG, "DNS 劫持就绪 (任意域名 -> 192.168.4.1)");
+    uint8_t rx[512], tx[600];
+    while (true) {
+        struct sockaddr_in src;
+        socklen_t slen = sizeof(src);
+        int n = recvfrom(sock, rx, sizeof(rx), 0, (struct sockaddr*)&src, &slen);
+        if (n < 12 || (rx[2] & 0x80)) continue;   // 太短或是响应包, 跳过
+
+        memcpy(tx, rx, n);
+        tx[2] |= 0x80;   // QR = 响应
+        tx[3] |= 0x80;   // RA = 递归可用
+        tx[6] = 0; tx[7] = 1;   // ANCOUNT = 1
+        int p = n;
+        tx[p++] = 0xC0; tx[p++] = 0x0C;            // 指向偏移12的问题名
+        tx[p++] = 0; tx[p++] = 1;                  // TYPE A
+        tx[p++] = 0; tx[p++] = 1;                  // CLASS IN
+        tx[p++] = 0; tx[p++] = 0; tx[p++] = 0; tx[p++] = 60;  // TTL 60
+        tx[p++] = 0; tx[p++] = 4;                  // RDLENGTH 4
+        tx[p++] = kApIp[0]; tx[p++] = kApIp[1]; tx[p++] = kApIp[2]; tx[p++] = kApIp[3];
+        sendto(sock, tx, p, 0, (struct sockaddr*)&src, slen);
+    }
+}
+
+// =====================================================================
 // WiFi AP + HTTP 启动
 // =====================================================================
 static void StartSoftAp() {
@@ -178,7 +229,11 @@ static void StartSoftAp() {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "调试 AP: SSID='%s' %s  网页: http://192.168.4.1",
+    // 降低发射功率(单位 0.25dBm, 40=10dBm; 默认~20dBm), 减小电流尖峰, 缓解供电 brownout
+    // 近距离调试 10dBm 足够。仍是"连上就掉线"则基本就是电源撑不住 WiFi。
+    esp_wifi_set_max_tx_power(40);
+
+    ESP_LOGI(TAG, "调试 AP: SSID='%s' %s  连上后自动弹出网页 (captive portal)",
              (char*)wc.ap.ssid, wc.ap.authmode == WIFI_AUTH_OPEN ? "(开放)" : "(WPA2)");
 }
 
@@ -186,16 +241,20 @@ static void StartHttp() {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 6144;     // 电机移动在 handler 里阻塞, 给足栈
+    config.uri_match_fn = httpd_uri_match_wildcard;   // 支持 /* 通配 (captive portal)
     ESP_ERROR_CHECK(httpd_start(&server, &config));
 
+    // 先注册精确的 API/根, 再注册 /* 兜底 (httpd 按注册顺序首个匹配生效)
     static const httpd_uri_t uri_root  = { .uri="/",          .method=HTTP_GET, .handler=handle_root  };
     static const httpd_uri_t uri_state = { .uri="/api/state", .method=HTTP_GET, .handler=handle_state };
     static const httpd_uri_t uri_motor = { .uri="/api/motor", .method=HTTP_GET, .handler=handle_motor };
     static const httpd_uri_t uri_log   = { .uri="/api/log",   .method=HTTP_GET, .handler=handle_log   };
+    static const httpd_uri_t uri_catch = { .uri="/*",         .method=HTTP_GET, .handler=handle_catchall };
     httpd_register_uri_handler(server, &uri_root);
     httpd_register_uri_handler(server, &uri_state);
     httpd_register_uri_handler(server, &uri_motor);
     httpd_register_uri_handler(server, &uri_log);
+    httpd_register_uri_handler(server, &uri_catch);
 }
 
 void DebugWeb::Start(MotorControl* motor, PowerControl* power) {
@@ -204,8 +263,9 @@ void DebugWeb::Start(MotorControl* motor, PowerControl* power) {
 
     LogCaptureInit();   // 尽早装日志捕获 (之后的日志都会进网页)
     StartSoftAp();
+    xTaskCreate(DnsTask, "dns_hijack", 3072, NULL, 5, NULL);   // captive portal DNS 劫持
     StartHttp();
-    ESP_LOGI(TAG, "调试网页就绪");
+    ESP_LOGI(TAG, "调试网页就绪 (连上热点自动弹页)");
 }
 
 #endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE
