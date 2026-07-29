@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_ota_ops.h>
+#include "sdkconfig.h"
 
 #include "board.h"
 #include "system_info.h"
@@ -23,6 +24,7 @@
  *   4. 有激活码 → 通过串口输出激活码，等待用户在小程序/网页绑定设备
  *   5. 激活成功 → 标记当前版本有效，流程结束
  */
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE
 static void CheckNewVersion(Ota& ota) {
     const int MAX_RETRY = 10;
     int retry_count = 0;
@@ -126,6 +128,7 @@ static void CheckNewVersion(Ota& ota) {
 
     ESP_LOGI(TAG, "========== 版本检查与激活流程完成 ==========");
 }
+#endif  // !CONFIG_ITOY_ENABLE_DEBUG_MODE
 
 extern "C" void app_main(void)
 {
@@ -150,8 +153,12 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "========== 网络连接完成 ==========");
 
     // OTA 检查版本 + 设备激活绑定
+    // 调试模式是 AP-only(无 STA), 跳过 OTA: 否则 OTA 里 GetBoardJson->GetRssi()
+    // 会因无 STA 连接 ESP_ERROR_CHECK abort 导致重启循环。
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE
     Ota ota;
     CheckNewVersion(ota);
+#endif
 
     ESP_LOGI(TAG, "========== itoy-OTA 启动完成 ==========");
 
