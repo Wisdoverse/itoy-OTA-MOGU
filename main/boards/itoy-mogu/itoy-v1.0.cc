@@ -54,13 +54,15 @@ public:
         // ---- 电机自检模式: 无网络/无调试, 仅正反转各 1 圈, 验证电机本身 ----
         // 不起 WiFi, 排除 WiFi brownout 干扰; 8192 步 = 输出轴 1 圈 (半步+1:64)
         motor_.Initialize();
-        ESP_LOGI(TAG, "=== 电机自检开始 (无网络; 8192 步 = 输出轴 1 圈) ===");
-        ESP_LOGI(TAG, "[点头] 正转 1 圈 ...");  motor_.MoveSteps(MOTOR_NOD,    MOTOR_STEPS_PER_REV, 3);
-        ESP_LOGI(TAG, "[点头] 反转 1 圈 ...");  motor_.MoveSteps(MOTOR_NOD,   -MOTOR_STEPS_PER_REV, 3);
-        ESP_LOGI(TAG, "[摇头] 正转 1 圈 ...");  motor_.MoveSteps(MOTOR_SHAKE,  MOTOR_STEPS_PER_REV, 3);
-        ESP_LOGI(TAG, "[摇头] 反转 1 圈 ...");  motor_.MoveSteps(MOTOR_SHAKE, -MOTOR_STEPS_PER_REV, 3);
+        const int kRevSteps = MOTOR_SELFTEST_REV * MOTOR_STEPS_PER_REV;   // N 圈的步数
+        ESP_LOGI(TAG, "=== 电机自检开始 (无网络; 正反各 %d 圈 = %d 步, %dms/步) ===",
+                 MOTOR_SELFTEST_REV, kRevSteps, MOTOR_SELFTEST_DELAY_MS);
+        ESP_LOGI(TAG, "[点头] 正转 %d 圈 ...", MOTOR_SELFTEST_REV);  motor_.MoveSteps(MOTOR_NOD,    kRevSteps, MOTOR_SELFTEST_DELAY_MS);
+        ESP_LOGI(TAG, "[点头] 反转 %d 圈 ...", MOTOR_SELFTEST_REV);  motor_.MoveSteps(MOTOR_NOD,   -kRevSteps, MOTOR_SELFTEST_DELAY_MS);
+        ESP_LOGI(TAG, "[摇头] 正转 %d 圈 ...", MOTOR_SELFTEST_REV);  motor_.MoveSteps(MOTOR_SHAKE,  kRevSteps, MOTOR_SELFTEST_DELAY_MS);
+        ESP_LOGI(TAG, "[摇头] 反转 %d 圈 ...", MOTOR_SELFTEST_REV);  motor_.MoveSteps(MOTOR_SHAKE, -kRevSteps, MOTOR_SELFTEST_DELAY_MS);
         motor_.StopAll();
-        ESP_LOGI(TAG, "=== 电机自检完成 (应已正反各转 1 圈; 只抖不转 = 电机/接线/相位问题) ===");
+        ESP_LOGI(TAG, "=== 电机自检完成 (应正反各转 %d 圈; 只抖不转 = 电机/接线/相位问题) ===", MOTOR_SELFTEST_REV);
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
         // ---- 调试模式: 只初始化电机(含电池 ADC) + RGB; 跳过触摸/IMU/情绪 ----
         motor_.Initialize();

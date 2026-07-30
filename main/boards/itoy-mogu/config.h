@@ -100,6 +100,10 @@
 // 角度 -> 步数换算 (供手势/旋转用), 例: STEPS_FOR_DEG(10) ≈ 227 步
 #define STEPS_FOR_DEG(deg)   ((int)((deg) * MOTOR_STEPS_PER_REV / 360))
 
+// 电机自检参数 (CONFIG_ITOY_ENABLE_MOTOR_SELFTEST): 正/反各转 N 圈, 每步 D ms
+#define MOTOR_SELFTEST_DELAY_MS   6      // 每步延时 (慢一点更易起转; 不转可调大如 8)
+#define MOTOR_SELFTEST_REV        13     // 正/反各转多少圈 (8192 步/圈; 13 圈≈每个方向 ~10 分钟)
+
 // 电位器方向标定: 正转(cw)是否使该轴电位器读数增大
 // 1 = 增大, 0 = 减小。实测若软限位在刚起步就立即触发, 把对应项取反
 #define MOTOR_NOD_POT_CW_INC   1
