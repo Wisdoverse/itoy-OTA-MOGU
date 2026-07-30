@@ -38,7 +38,9 @@ private:
 public:
     ItoyMogu() {
         ESP_LOGI(TAG, "初始化 itoy-mogu 开发板 (%s)",
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+                 "电机自检模式"
+#elif CONFIG_ITOY_ENABLE_DEBUG_MODE
                  "调试模式"
 #else
                  "情绪蘑菇"
@@ -48,7 +50,18 @@ public:
         // 电源控制 (必须最先: 锁存供电)
         power_.Initialize();
 
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+        // ---- 电机自检模式: 无网络/无调试, 仅正反转各 1 圈, 验证电机本身 ----
+        // 不起 WiFi, 排除 WiFi brownout 干扰; 8192 步 = 输出轴 1 圈 (半步+1:64)
+        motor_.Initialize();
+        ESP_LOGI(TAG, "=== 电机自检开始 (无网络; 8192 步 = 输出轴 1 圈) ===");
+        ESP_LOGI(TAG, "[点头] 正转 1 圈 ...");  motor_.MoveSteps(MOTOR_NOD,    MOTOR_STEPS_PER_REV, 3);
+        ESP_LOGI(TAG, "[点头] 反转 1 圈 ...");  motor_.MoveSteps(MOTOR_NOD,   -MOTOR_STEPS_PER_REV, 3);
+        ESP_LOGI(TAG, "[摇头] 正转 1 圈 ...");  motor_.MoveSteps(MOTOR_SHAKE,  MOTOR_STEPS_PER_REV, 3);
+        ESP_LOGI(TAG, "[摇头] 反转 1 圈 ...");  motor_.MoveSteps(MOTOR_SHAKE, -MOTOR_STEPS_PER_REV, 3);
+        motor_.StopAll();
+        ESP_LOGI(TAG, "=== 电机自检完成 (应已正反各转 1 圈; 只抖不转 = 电机/接线/相位问题) ===");
+#elif CONFIG_ITOY_ENABLE_DEBUG_MODE
         // ---- 调试模式: 只初始化电机(含电池 ADC) + RGB; 跳过触摸/IMU/情绪 ----
         motor_.Initialize();
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
@@ -99,7 +112,9 @@ public:
 
     // 调试模式: 起网页调试 AP (不调正常配网, 避免与调试 AP 冲突); 否则正常配网
     void StartNetwork() override {
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+        ESP_LOGI(TAG, "电机自检模式: 跳过网络");
+#elif CONFIG_ITOY_ENABLE_DEBUG_MODE
         debug_.Start(&motor_, &power_);
 #else
         WifiBoard::StartNetwork();
