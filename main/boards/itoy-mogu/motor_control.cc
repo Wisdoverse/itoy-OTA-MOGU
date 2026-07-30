@@ -49,8 +49,15 @@ void StepperMotor::Initialize() {
 
 void StepperMotor::SetPhase(uint8_t phase) {
     for (int i = 0; i < 4; i++) {
-        gpio_set_level(pins_[i], kHalfStepSeq[phase][i]);
+        gpio_set_level(pins_[pin_order_[i]], kHalfStepSeq[phase][i]);
     }
+}
+
+void StepperMotor::SetPinOrder(uint8_t o0, uint8_t o1, uint8_t o2, uint8_t o3) {
+    pin_order_[0] = o0;
+    pin_order_[1] = o1;
+    pin_order_[2] = o2;
+    pin_order_[3] = o3;
 }
 
 void StepperMotor::AdvancePhase(bool clockwise) {
@@ -206,6 +213,8 @@ void MotorControl::Initialize() {
 
     motors_[MOTOR_NOD]->Initialize();
     motors_[MOTOR_SHAKE]->Initialize();
+    motors_[MOTOR_NOD]->SetPinOrder(MOTOR_NOD_PIN_ORDER);
+    motors_[MOTOR_SHAKE]->SetPinOrder(MOTOR_SHAKE_PIN_ORDER);
 
     step_mutex_ = xSemaphoreCreateMutex();
 

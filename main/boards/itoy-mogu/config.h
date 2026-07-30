@@ -86,6 +86,12 @@
 #define MOTOR_SHAKE_D_GPIO  GPIO_NUM_16
 #define MOTOR_SHAKE_INVERT  0   // 1 = 翻转正/负方向
 
+// 相位顺序 (调线圈接线用): 逻辑线圈 0,1,2,3 对应物理引脚序号 A=0,B=1,C=2,D=3
+// 默认 0,1,2,3。若电机"震动不转" 多半是线圈顺序不对:
+// 试着改成 0,2,1,3 / 0,1,3,2 / 0,3,1,2 等排列, 直到能平稳转动。
+#define MOTOR_NOD_PIN_ORDER   0,1,2,3
+#define MOTOR_SHAKE_PIN_ORDER 0,1,2,3
+
 // --- 步进电机参数 ---
 #define MOTOR_STEP_DELAY_MS 2       // 半步间隔 (ms), 越小越快
 // 28BYJ-48 + ULN2003, 5.625°/全步, 1:64 减速:

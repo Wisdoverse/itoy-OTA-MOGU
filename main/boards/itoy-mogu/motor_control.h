@@ -50,6 +50,10 @@ public:
     void SetSpeed(int delay_ms);
     int GetSpeed() const { return step_delay_ms_; }
 
+    // 设置相位顺序: 逻辑线圈 0,1,2,3 -> 物理引脚序号 (A=0,B=1,C=2,D=3)
+    // 用于修正"震动不转"(线圈接线顺序不对)。默认 0,1,2,3
+    void SetPinOrder(uint8_t o0, uint8_t o1, uint8_t o2, uint8_t o3);
+
     uint32_t pot_min() const { return pot_min_; }
     uint32_t pot_max() const { return pot_max_; }
     bool pot_cw_inc() const { return pot_cw_inc_; }
@@ -59,6 +63,7 @@ private:
     void SetPhase(uint8_t phase);
 
     gpio_num_t pins_[4];
+    uint8_t pin_order_[4] = {0, 1, 2, 3};   // 逻辑线圈 -> 物理引脚序号
     adc_oneshot_unit_handle_t adc_handle_;
     adc_channel_t adc_channel_;
     uint32_t pot_min_;

@@ -31,6 +31,11 @@ static const uint8_t kApIp[4] = {192, 168, 4, 1};
 static MotorControl* s_motor = nullptr;
 static PowerControl* s_power = nullptr;
 
+// 非阻塞电机指令: handler 填 s_cmd 后 give, MotorTask take 后执行 (大步数不卡网页)
+typedef struct { uint8_t motor; int eff; int delay_ms; } MotorCmd;
+static MotorCmd s_cmd;
+static SemaphoreHandle_t s_motor_sem = NULL;
+
 // ---- 日志环形缓冲 (esp_log_set_vprintf 捕获) ----
 static constexpr size_t kLogBufSize = 3072;
 static char s_logbuf[kLogBufSize];
@@ -100,7 +105,7 @@ static const char kIndexHtml[] =
 "e.value=t;e.scrollTop=e.scrollHeight;}catch(e){}}"
 "async function mv(m,dir){let s=parseInt(document.getElementById('steps').value)||0;"
 "let dl=parseInt(document.getElementById('delay').value)||4;"
-"if(Math.abs(s)>2000){alert('步数限制 2000');return;}"
+"if(Math.abs(s)>8192){alert('步数上限 8192');return;}"
 "await fetch('/api/motor?m='+m+'&dir='+dir+'&steps='+s+'&delay='+dl);}"
 "state();log();setInterval(state,1000);setInterval(log,1000);"
 "</script></body></html>";
@@ -146,20 +151,20 @@ static esp_err_t handle_motor(httpd_req_t* req) {
     if (httpd_query_key_value(query, "dir", val, sizeof(val)) == ESP_OK) dir = atoi(val);
     if (httpd_query_key_value(query, "steps", val, sizeof(val)) == ESP_OK) steps = atoi(val);
     if (httpd_query_key_value(query, "delay", val, sizeof(val)) == ESP_OK) delay_ms = atoi(val);
-    if (steps > 2000) steps = 2000;
-    if (steps < -2000) steps = -2000;
+    if (steps > 8192) steps = 8192;       // 上限放宽到 8192 (~2 圈), 非阻塞
+    if (steps < -8192) steps = -8192;
     if (delay_ms < 1) delay_ms = 4;
     if (delay_ms > 20) delay_ms = 20;
 
     int eff = dir >= 0 ? steps : -steps;
-    ESP_LOGI(TAG, "motor %c dir=%d steps=%d delay=%dms (eff=%d)", motor, dir, steps, delay_ms, eff);
-    if (s_motor) {
-        // 调试用原始步进: 不走电位器软限位, 带加速斜坡; delay 可调
-        if (motor == 'a') s_motor->MoveSteps(MOTOR_NOD, eff, delay_ms);
-        else              s_motor->MoveSteps(MOTOR_SHAKE, eff, delay_ms);
-    }
+    ESP_LOGI(TAG, "motor %c dir=%d steps=%d delay=%dms (eff=%d) -> 后台执行", motor, dir, steps, delay_ms, eff);
+    // 交给后台电机任务, 立即返回 (大步数也不卡网页)
+    s_cmd.motor = motor;
+    s_cmd.eff = eff;
+    s_cmd.delay_ms = delay_ms;
+    xSemaphoreGive(s_motor_sem);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, "{\"ok\":true,\"queued\":true}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -206,6 +211,18 @@ static void DnsTask(void* /*arg*/) {
         tx[p++] = 0; tx[p++] = 4;                  // RDLENGTH 4
         tx[p++] = kApIp[0]; tx[p++] = kApIp[1]; tx[p++] = kApIp[2]; tx[p++] = kApIp[3];
         sendto(sock, tx, p, 0, (struct sockaddr*)&src, slen);
+    }
+}
+
+// ---- 非阻塞电机指令: 避免长步进阻塞 httpd (步数多也不卡网页) ----
+static void MotorTask(void* /*arg*/) {
+    while (true) {
+        xSemaphoreTake(s_motor_sem, portMAX_DELAY);
+        MotorCmd c = s_cmd;
+        if (s_motor) {
+            if (c.motor == 'a') s_motor->MoveSteps(MOTOR_NOD, c.eff, c.delay_ms);
+            else                 s_motor->MoveSteps(MOTOR_SHAKE, c.eff, c.delay_ms);
+        }
     }
 }
 
@@ -271,6 +288,8 @@ void DebugWeb::Start(MotorControl* motor, PowerControl* power) {
     LogCaptureInit();   // 尽早装日志捕获 (之后的日志都会进网页)
     StartSoftAp();
     xTaskCreate(DnsTask, "dns_hijack", 3072, NULL, 5, NULL);   // captive portal DNS 劫持
+    s_motor_sem = xSemaphoreCreateBinary();
+    xTaskCreate(MotorTask, "db_motor", 4096, NULL, 5, NULL);    // 后台电机执行 (非阻塞)
     StartHttp();
     ESP_LOGI(TAG, "调试网页就绪 (连上热点自动弹页)");
 }
