@@ -1,6 +1,7 @@
 #include "motor_control.h"
 #include "config.h"
 #include <esp_log.h>
+#include <esp_rom_sys.h>
 #include <cmath>
 #include <cstdlib>
 
@@ -125,22 +126,20 @@ void StepperMotor::RotateRevolutions(float revolutions) {
 }
 
 void StepperMotor::StepRaw(int steps, int delay_ms) {
-    if (delay_ms < 1) delay_ms = step_delay_ms_;
-    bool clockwise = steps >= 0;
-    int abs_steps = std::abs(steps);
+    // 与 728c777 的 Step() 完全一致: esp_rom_delay_us 微秒级精确延时
+    // (不能用 vTaskDelay: FreeRTOS tick=10ms, pdMS_TO_TICKS(2~6)=0 -> 无延时 -> 电机狂抖)
+    if (steps == 0) return;
+    int dir = (steps > 0) ? 1 : -1;
+    unsigned int total = (steps > 0) ? (unsigned int)steps : (unsigned int)(-steps);
+    uint32_t us = (delay_ms > 0 ? (uint32_t)delay_ms : 2) * 1000;   // ms -> us
 
-    // 加速斜坡: 起步用 2 倍慢速让转子跟上, 前 80 步线性加速到目标速度。
-    // 没有斜坡时, 从静止直接给目标速度, 28BYJ-48 容易打滑只抖不转。
-    int cruise = delay_ms;
-    int start = cruise * 2;
-    if (start > 20) start = 20;
-    int ramp_n = abs_steps < 80 ? abs_steps : 80;
-
-    for (int i = 0; i < abs_steps; i++) {
-        AdvancePhase(clockwise);                  // 不读电位器, 不软限位
-        int d = (i < ramp_n) ? (start - (start - cruise) * i / (ramp_n > 0 ? ramp_n : 1))
-                             : cruise;
-        vTaskDelay(pdMS_TO_TICKS(d));
+    for (unsigned int i = 0; i < total; ++i) {
+        AdvancePhase(dir > 0);
+        esp_rom_delay_us(us);
+        // 每 64 步让出一次 CPU, 避免长时间忙等触发看门狗
+        if ((i & 0x3F) == 0x3F) {
+            vTaskDelay(1);
+        }
     }
 }
 
