@@ -253,6 +253,7 @@ void MotorControl::MotorTaskFunc(void* arg) {
 }
 
 void MotorControl::MotorLoop() {
+    int yield_cnt = 0;
     while (true) {
         int delay_ms = 50;
         xSemaphoreTake(step_mutex_, portMAX_DELAY);
@@ -271,7 +272,15 @@ void MotorControl::MotorLoop() {
         }
         xSemaphoreGive(step_mutex_);
 
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        // 步进延时: <10ms 时 FreeRTOS tick(10ms) 粒度不够, pdMS_TO_TICKS 算出 0
+        // -> 电机狂抖不转只发烫。改用 esp_rom_delay_us 微秒级精确延时。
+        if (delay_ms > 0 && delay_ms < 10) {
+            esp_rom_delay_us((uint32_t)delay_ms * 1000);
+            if (++yield_cnt >= 64) { vTaskDelay(1); yield_cnt = 0; }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(delay_ms > 0 ? delay_ms : 50));
+            yield_cnt = 0;
+        }
     }
 }
 
@@ -373,9 +382,9 @@ void MotorControl::ShakeSteps(int steps) {
 void MotorControl::MoveSteps(MotorId id, int steps, int delay_ms) {
     if (!initialized_ || id < 0 || id >= MOTOR_COUNT) return;
     if (delay_ms < 1) delay_ms = 3;
-    // 调试用: 不走电位器软限位, 带加速斜坡; delay_ms 由调用方(网页)决定
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     motors_[id]->StepRaw(steps, delay_ms);
+    motors_[id]->Stop();   // 走完立刻断电, 防止线圈持续通电发热
     xSemaphoreGive(step_mutex_);
 }
 

@@ -66,6 +66,8 @@ public:
             motor_.MoveSteps(MOTOR_SHAKE,  kRevSteps, MOTOR_SELFTEST_DELAY_MS);
             ESP_LOGI(TAG, "[摇头] 反 %d 圈", MOTOR_SELFTEST_REV);
             motor_.MoveSteps(MOTOR_SHAKE, -kRevSteps, MOTOR_SELFTEST_DELAY_MS);
+            ESP_LOGI(TAG, "[冷却] 断电 3 秒...");
+            vTaskDelay(pdMS_TO_TICKS(3000));
         }
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
         // ---- 调试模式: 只初始化电机(含电池 ADC) + RGB; 跳过触摸/IMU/情绪 ----
