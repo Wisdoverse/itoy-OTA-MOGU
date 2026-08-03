@@ -53,21 +53,29 @@ config ITOY_ENABLE_MOTOR
         关闭则完全不初始化电机、不跑情绪里的电机手势
         (适合裸板调试 / 无电机时, 也省 ADC)。
 
-config ITOY_ENABLE_DEBUG_MODE
-    bool "启用调试测试模式 (WiFi 热点 + 网页调试, 关闭不影响主程序)"
-    default n
+# ---- 运行模式 (三选一, 互斥) ----
+choice ITOY_RUN_MODE
+    prompt "运行模式 (三选一)"
+    default ITOY_RUN_NORMAL
     help
-        开机进入调试模式: 起一个 WiFi 热点 Itoy-Debug-XXXX, 手机/电脑连上后
-        浏览器访问 http://192.168.4.1 打开调试网页:
-          - 控制电机 (点头/摇头 正反转, 步数可调)
-          - 实时显示电位器 (nod/shake) 读数
-          - 实时显示电池电压 / 电量
-          - 串口日志 (ESP_LOG) 实时流
+        选择设备启动后的运行模式。三选一, 互斥。
 
-        启用后跳过正常配网与情绪状态机, 专用调试 (复用 MotorControl +
-        PowerControl)。关闭则完全不影响主程序。
+    config ITOY_RUN_NORMAL
+        bool "正常模式 (情绪蘑菇 + WiFi/BLE 配网)"
+        help
+            完整功能: 触摸 → 情绪状态机 → 电机手势 + RGB + OTA。
 
-        注: WiFi 发射有电流尖峰, 供电不足会 brownout (裸板需能撑住 WiFi 的电源)。
+    config ITOY_ENABLE_DEBUG_MODE
+        bool "调试模式 (WiFi 热点 + 网页调试)"
+        help
+            开机起 WiFi 热点 Itoy-Debug-XXXX, 网页控电机/看触摸/电位器/电池/日志。
+            跳过配网与情绪。
+
+    config ITOY_ENABLE_MOTOR_SELFTEST
+        bool "电机自检 (仅正反转, 无网络/无调试)"
+        help
+            不起网络/调试, 仅让电机持续正反转验证。排除一切干扰。
+endchoice
 
 config ITOY_DEBUG_AP_PASSWORD
     string "调试热点密码 (留空 = 开放热点)"
@@ -75,15 +83,6 @@ config ITOY_DEBUG_AP_PASSWORD
     depends on ITOY_ENABLE_DEBUG_MODE
     help
         调试热点的 WPA2 密码; 留空则开放 (无密码), 方便调试。
-
-config ITOY_ENABLE_MOTOR_SELFTEST
-    bool "启用电机自检模式 (仅跑电机正反转各1圈, 无网络/无调试)"
-    default n
-    help
-        最纯净的电机验证: 开机后不起 WiFi/BLE/网页/情绪/OTA, 只让两个电机
-        各 [正转1圈 → 反转1圈] (8192 步/圈), 串口打印进度, 结束后断电静止。
-        用于排除一切干扰 (尤其 WiFi brownout), 单独验证电机/接线/相位。
-        优先级最高: 与调试/正常模式同时开时, 以本模式为准。
 
 config ITOY_ENABLE_IMU
     bool "启用 IMU (QMI8658A)"
