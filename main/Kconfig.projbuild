@@ -91,4 +91,33 @@ config ITOY_ENABLE_IMU
     help
         关闭则跳过 IMU 初始化 (裸板无 IMU 时关掉, 避免无谓 I2C 探测)。
 
+# ---- 触摸参数 (主代码 + 调试网页共用) ----
+config ITOY_TOUCH_RATIO
+    int "触摸触发倍率 (x1000: 1150 = 基线 x 1.15)"
+    default 1150
+    range 1050 3000
+    help
+      触摸判断: 读数 > 基线 x (此值 / 1000) = 触摸。
+      实测 IO1: 基线 ~21000, 轻触 ~25000(x1.18), 重压 >10 万。
+      1100=灵敏(轻触即触发) / 1150=适中 / 1300=迟钝(需重压)。
+
+config ITOY_TOUCH_CH0_BASELINE
+    int "CH0 (GPIO1) 触摸基线 (0=开机自动测量)"
+    default 0
+    help
+      设为实测基线值(如 21000)可跳过开机自动测量, 检测更稳定。
+      0 = 开机时自动读取一次作为基线。
+
+config ITOY_TOUCH_CH1_BASELINE
+    int "CH1 (GPIO2) 触摸基线 (0=开机自动测量)"
+    default 0
+
+config ITOY_TOUCH_CH2_BASELINE
+    int "CH2 (GPIO3) 触摸基线 (0=开机自动测量)"
+    default 0
+
+config ITOY_TOUCH_CH3_BASELINE
+    int "CH3 (GPIO4) 触摸基线 (0=开机自动测量)"
+    default 0
+
 endmenu

@@ -23,8 +23,9 @@
 #define TOUCH_PAD_COUNT     4
 
 // 触摸触发条件: 读数 > 基线 × 此值 = 触摸
-// (实测 IO1: 基线~21000, 轻触~25000, 重压>10万 → 读数变大 = 触摸)
-#define TOUCH_THRESHOLD_RATIO 1.15f   // 越大越不灵敏 (1.1=灵敏, 1.2=迟钝)
+// 倍率由 menuconfig CONFIG_ITOY_TOUCH_RATIO 控制 (x1000, 默认 1150 = 1.15)
+// 实测 IO1: 基线~21000, 轻触~25000, 重压>10万 → 读数变大 = 触摸
+#define TOUCH_THRESHOLD_RATIO ((float)CONFIG_ITOY_TOUCH_RATIO / 1000.0f)
 
 // --- ADC (电位器位置反馈 + 电池电压) ---
 // ESP32-S3 ADC1: GPIO5=CH4, GPIO6=CH5, GPIO7=CH6

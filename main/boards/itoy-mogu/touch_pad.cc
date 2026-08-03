@@ -47,14 +47,23 @@ void TouchPad::Initialize() {
     // 等待稳定
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 先读取一次基准值用于阈值
+    // 先读取一次基准值用于阈值 (或用 Kconfig 设定的基线)
+    static const uint32_t kCfgBaselines[TOUCH_PAD_COUNT] = {
+        CONFIG_ITOY_TOUCH_CH0_BASELINE, CONFIG_ITOY_TOUCH_CH1_BASELINE,
+        CONFIG_ITOY_TOUCH_CH2_BASELINE, CONFIG_ITOY_TOUCH_CH3_BASELINE,
+    };
     for (int i = 0; i < TOUCH_PAD_COUNT; i++) {
         uint32_t val = 0;
-        touch_pad_read_raw_data(kTouchChannels[i], &val);
-        baselines_[i] = val;
-        thresholds_[i] = (uint32_t)(val * TOUCH_THRESHOLD_RATIO);
-        ESP_LOGI(TAG, "Touch ch%d (GPIO%d): baseline=%lu, threshold=%lu",
-                 i, i + 1, baselines_[i], thresholds_[i]);
+        if (kCfgBaselines[i] > 0) {
+            baselines_[i] = kCfgBaselines[i];        // 用 menuconfig 设定的基线
+        } else {
+            touch_pad_read_raw_data(kTouchChannels[i], &val);
+            baselines_[i] = val;                      // 开机自动测量
+        }
+        thresholds_[i] = (uint32_t)(baselines_[i] * TOUCH_THRESHOLD_RATIO);
+        ESP_LOGI(TAG, "Touch ch%d (GPIO%d): baseline=%lu(%s), threshold=%lu",
+                 i, i + 1, baselines_[i],
+                 kCfgBaselines[i] > 0 ? "manual" : "auto", thresholds_[i]);
     }
 
     // 设置硬件阈值 (轮询模式下主要用软件阈值, 这里同步一份)
