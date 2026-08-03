@@ -116,6 +116,13 @@ void MoodController::SetNightLight(bool on) {
     // 退出夜灯也用同一事件 (在 NIGHT_LIGHT 态下切换回 CALM)
 }
 
+void MoodController::RequestExternalMood(MoodState s) {
+    // 先写值再置标志, mood 任务下一 tick (≤100ms) 读到后应用. 关机态不打断.
+    external_mood_ = s;
+    pending_external_mood_ = true;
+    ESP_LOGI(TAG, "external mood requested: %s", StateName(s));
+}
+
 void MoodController::TaskFunc(void* arg) {
     static_cast<MoodController*>(arg)->Loop();
 }
@@ -126,6 +133,15 @@ void MoodController::Loop() {
 
         PollTouch(tick_ms_);
         PollBattery(tick_ms_);
+
+        // 后端下发情绪: 应用待处理请求 (关机态不打断)
+        if (pending_external_mood_) {
+            MoodState req = external_mood_;
+            pending_external_mood_ = false;
+            if (state_ != MOOD_OFF && req != state_) {
+                ChangeState(req);
+            }
+        }
 
         uint32_t in_state = tick_ms_ - state_enter_ms_;
 

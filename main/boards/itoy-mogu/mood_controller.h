@@ -51,6 +51,8 @@ public:
     void Start();                 // 启动状态机任务, 自动进入 POWER_ON
     void RequestPowerOff();       // 请求关机 (渐灭后断电)
     void SetNightLight(bool on);  // 夜灯开关 (app 调用)
+    // 后端下发情绪 -> 请求切到某状态 (线程安全: 仅置标志, 由 mood 任务下一 tick 应用)
+    void RequestExternalMood(MoodState s);
 
     MoodState state() const { return state_; }
 
@@ -103,6 +105,10 @@ private:
 
     // 关机流程
     bool off_requested_ = false;
+
+    // 后端下发情绪的待处理请求 (网络线程写, mood 任务读+清)
+    volatile bool pending_external_mood_ = false;
+    MoodState external_mood_ = MOOD_CALM;
 };
 
 #endif // MOOD_CONTROLLER_H_

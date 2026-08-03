@@ -158,6 +158,8 @@ extern "C" void app_main(void)
 #if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
     Ota ota;
     CheckNewVersion(ota);
+    // 启动后端实时通道 (MQTT/WebSocket + MCP), 仅正常模式; OTA 已写入连接配置到 NVS
+    board.StartBackendService();
 #endif
 
     ESP_LOGI(TAG, "========== itoy-OTA 启动完成 ==========");

@@ -30,6 +30,8 @@ public:
     virtual std::string GetUuid() { return uuid_; }
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
+    // OTA 检查完成后启动后端实时通道 (MQTT/WebSocket + MCP). 默认空实现.
+    virtual void StartBackendService() {}
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetSystemInfoJson();

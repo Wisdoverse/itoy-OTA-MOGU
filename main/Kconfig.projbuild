@@ -2,10 +2,10 @@ menu "itoy OTA 配置"
 
 config OTA_URL
     string "默认 OTA 升级服务器地址"
-    default "https://api.tenclass.net/xiaozhi/ota/"
+    default "http://gold-goat-28797.zap.cloud:18180/itoy/ota"
     help
         设备通过此 URL 检查固件更新和获取服务器配置。
-        需要完整的 HTTP/HTTPS 地址，以 / 结尾。
+        完整的 HTTP/HTTPS 地址 (与 itoy-esp32 后端一致)。
 
 # 开发板类型固定为 itoy（不可更改）
 config BOARD_TYPE_ITOY_WIFI_LCD

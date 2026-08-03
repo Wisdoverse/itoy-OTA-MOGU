@@ -16,6 +16,7 @@
 #include "imu_qmi8658a.h"
 #endif
 #include "mood_controller.h"
+#include "backend_client.h"
 #endif
 
 #define TAG "ItoyMogu"
@@ -33,6 +34,7 @@ private:
     ImuQMI8658A imu_;
 #endif
     MoodController mood_;
+    BackendClient backend_;
 #endif
 
 public:
@@ -89,6 +91,7 @@ public:
 #endif
         mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
         mood_.Start();
+        backend_.Initialize(&power_, &touch_, &motor_, &mood_);
 
 #if CONFIG_ITOY_ENABLE_MOTOR
         ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV, RGB=%dLEDs",
@@ -127,6 +130,13 @@ public:
         debug_.Start(&motor_, &power_, &touch_);
 #else
         WifiBoard::StartNetwork();
+#endif
+    }
+
+    // OTA 检查完成后启动后端实时通道 (仅正常模式)
+    void StartBackendService() override {
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+        backend_.Start();
 #endif
     }
 
