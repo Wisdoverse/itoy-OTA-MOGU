@@ -3,15 +3,15 @@
 #include "motor_control.h"
 #include "power_control.h"
 #include "rgb_led.h"
+#include "touch_pad.h"
 
 #include <esp_log.h>
 
 #if CONFIG_ITOY_ENABLE_DEBUG_MODE
-// 调试模式: WiFi 热点 + 网页调试 (控电机/电位器/电池/日志), 跳过情绪与配网
+// 调试模式: WiFi 热点 + 网页调试 (控电机/电位器/电池/触摸/日志), 跳过情绪与配网
 #include "debug_web.h"
 #else
-// 正常模式: 情绪蘑菇 + 触摸/IMU/配网
-#include "touch_pad.h"
+// 正常模式: 情绪蘑菇 + IMU/配网
 #if CONFIG_ITOY_ENABLE_IMU
 #include "imu_qmi8658a.h"
 #endif
@@ -25,10 +25,10 @@ private:
     MotorControl motor_;
     PowerControl power_;
     RgbLed rgb_;
+    TouchPad touch_;
 #if CONFIG_ITOY_ENABLE_DEBUG_MODE
     DebugWeb debug_;
 #else
-    TouchPad touch_;
 #if CONFIG_ITOY_ENABLE_IMU
     ImuQMI8658A imu_;
 #endif
@@ -74,7 +74,8 @@ public:
         motor_.Initialize();
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
         rgb_.Initialize();   // 默认熄灭
-        ESP_LOGI(TAG, "调试模式: motor + adc + rgb 就绪 (网页由 StartNetwork 启动)");
+        touch_.Initialize(); // 触摸 (网页显示触摸值)
+        ESP_LOGI(TAG, "调试模式: motor + adc + rgb + touch 就绪 (网页由 StartNetwork 启动)");
 #else
         // ---- 正常模式 ----
 #if CONFIG_ITOY_ENABLE_MOTOR
@@ -123,7 +124,7 @@ public:
 #if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
         ESP_LOGI(TAG, "电机自检模式: 跳过网络");
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
-        debug_.Start(&motor_, &power_);
+        debug_.Start(&motor_, &power_, &touch_);
 #else
         WifiBoard::StartNetwork();
 #endif

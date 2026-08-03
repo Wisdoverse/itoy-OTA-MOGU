@@ -5,6 +5,7 @@
 #include "config.h"
 #include "motor_control.h"
 #include "power_control.h"
+#include "touch_pad.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,7 @@ static const uint8_t kApIp[4] = {192, 168, 4, 1};
 // ---- 文件级上下文 ----
 static MotorControl* s_motor = nullptr;
 static PowerControl* s_power = nullptr;
+static TouchPad* s_touch = nullptr;
 
 // 非阻塞电机指令: handler 填 s_cmd 后 give, MotorTask take 后执行 (大步数不卡网页)
 typedef struct { uint8_t motor; int eff; int delay_ms; } MotorCmd;
@@ -93,13 +95,17 @@ static const char kIndexHtml[] =
 "<button onclick=mv('b',1)>摇头 +</button>"
 "<button onclick=mv('b',-1)>摇头 −</button>"
 "<h2>状态</h2><div class=st id=state>读取中…</div>"
+"<h2>触摸 (GPIO1-4)</h2><div class=st id=touch>读取中…</div>"
 "<h2>串口日志</h2><textarea id=log readonly></textarea>"
 "<script>"
 "async function state(){try{let r=await fetch('/api/state');"
 "let j=await r.json();"
 "document.getElementById('state').innerHTML="
 "'点头电位器: '+j.nod+'<br>摇头电位器: '+j.shake"
-"+'<br>电池: '+j.batt_mv+' mV ('+j.batt_pct+'%)';}catch(e){}}"
+"+'<br>电池: '+j.batt_mv+' mV ('+j.batt_pct+'%)';"
+"if(j.t){let h='';for(let i=0;i<4;i++){h+='CH'+i+' (GPIO'+(i+1)+'): '+j.t[i]+' '+"
+"(j.p[i]?'<b style=color:#f44>触摸</b>':'未触')+'<br>';}document.getElementById('touch').innerHTML=h;}"
+"}catch(e){}}"
 "async function log(){try{let r=await fetch('/api/log');"
 "let t=await r.text();let e=document.getElementById('log');"
 "e.value=t;e.scrollTop=e.scrollHeight;}catch(e){}}"
@@ -127,13 +133,26 @@ static esp_err_t handle_catchall(httpd_req_t* req) {
 }
 
 static esp_err_t handle_state(httpd_req_t* req) {
-    char json[160];
+    // 触摸 4 路
+    uint32_t tv[4] = {0,0,0,0};
+    bool tp[4] = {false,false,false,false};
+    if (s_touch) {
+        for (int i = 0; i < 4; i++) {
+            tv[i] = s_touch->GetRawValue(i);
+            tp[i] = s_touch->IsPressed(i);
+        }
+    }
+    char json[300];
     snprintf(json, sizeof(json),
-             "{\"nod\":%lu,\"shake\":%lu,\"batt_mv\":%d,\"batt_pct\":%d}",
+             "{\"nod\":%lu,\"shake\":%lu,\"batt_mv\":%d,\"batt_pct\":%d,"
+             "\"t\":[%lu,%lu,%lu,%lu],\"p\":[%s,%s,%s,%s]}",
              s_motor ? s_motor->ReadNodPosition() : 0,
              s_motor ? s_motor->ReadShakePosition() : 0,
              s_power ? s_power->ReadBatteryMv() : 0,
-             s_power ? s_power->ReadBatteryPercent() : 0);
+             s_power ? s_power->ReadBatteryPercent() : 0,
+             tv[0], tv[1], tv[2], tv[3],
+             tp[0]?"true":"false", tp[1]?"true":"false",
+             tp[2]?"true":"false", tp[3]?"true":"false");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -281,9 +300,10 @@ static void StartHttp() {
     httpd_register_uri_handler(server, &uri_catch);
 }
 
-void DebugWeb::Start(MotorControl* motor, PowerControl* power) {
+void DebugWeb::Start(MotorControl* motor, PowerControl* power, TouchPad* touch) {
     s_motor = motor;
     s_power = power;
+    s_touch = touch;
 
     LogCaptureInit();   // 尽早装日志捕获 (之后的日志都会进网页)
     StartSoftAp();
