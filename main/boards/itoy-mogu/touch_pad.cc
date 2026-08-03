@@ -52,7 +52,7 @@ void TouchPad::Initialize() {
         uint32_t val = 0;
         touch_pad_read_raw_data(kTouchChannels[i], &val);
         baselines_[i] = val;
-        thresholds_[i] = (uint32_t)(val * 0.8f);
+        thresholds_[i] = (uint32_t)(val * TOUCH_THRESHOLD_RATIO);
         ESP_LOGI(TAG, "Touch ch%d (GPIO%d): baseline=%lu, threshold=%lu",
                  i, i + 1, baselines_[i], thresholds_[i]);
     }
@@ -84,7 +84,7 @@ void TouchPad::Calibrate(float ratio) {
 
     for (int i = 0; i < TOUCH_PAD_COUNT; i++) {
         baselines_[i] = (uint32_t)(sums[i] / samples);
-        thresholds_[i] = (uint32_t)(baselines_[i] * ratio);
+        thresholds_[i] = (uint32_t)(baselines_[i] * ratio);  // ratio>1.0 (触摸时读数变大)
         touch_pad_set_thresh(kTouchChannels[i], thresholds_[i]);
         ESP_LOGI(TAG, "Calibrated ch%d: baseline=%lu, threshold=%lu",
                  i, baselines_[i], thresholds_[i]);
@@ -102,7 +102,7 @@ uint32_t TouchPad::GetRawValue(int channel) const {
 
 bool TouchPad::IsPressed(int channel) const {
     if (channel < 0 || channel >= TOUCH_PAD_COUNT) return false;
-    return GetRawValue(channel) < thresholds_[channel];
+    return GetRawValue(channel) > thresholds_[channel];
 }
 
 void TouchPad::SetThreshold(int channel, uint32_t threshold) {
