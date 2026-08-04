@@ -52,24 +52,24 @@ BackendClient::~BackendClient() {
 // ------------------------------------------------------------------ 启动
 
 void BackendClient::Start() {
-    // 选传输: 优先 websocket, 否则 mqtt
-    Settings ws_set("websocket", false);
-    std::string ws_url = ws_set.GetString("url");
-    if (!ws_url.empty()) {
+    // 与 itoy-esp32 一致: 优先 MQTT, 其次 WebSocket
+    Settings mq_set("mqtt", false);
+    std::string endpoint = mq_set.GetString("endpoint");
+    publish_topic_ = mq_set.GetString("publish_topic");
+    if (!endpoint.empty() && !publish_topic_.empty()) {
+        use_ws_ = false;
+        ESP_LOGI(TAG, "使用 MQTT: %s topic=%s", endpoint.c_str(), publish_topic_.c_str());
+    } else {
+        Settings ws_set("websocket", false);
+        std::string ws_url = ws_set.GetString("url");
+        if (ws_url.empty()) {
+            ESP_LOGW(TAG, "OTA 未下发 mqtt/websocket 配置, 后端客户端不启动");
+            return;
+        }
         use_ws_ = true;
         ws_version_ = ws_set.GetInt("version", 1);
         if (ws_version_ == 0) ws_version_ = 1;
         ESP_LOGI(TAG, "使用 WebSocket: %s (version=%d)", ws_url.c_str(), ws_version_);
-    } else {
-        Settings mq_set("mqtt", false);
-        std::string endpoint = mq_set.GetString("endpoint");
-        publish_topic_ = mq_set.GetString("publish_topic");
-        if (endpoint.empty() || publish_topic_.empty()) {
-            ESP_LOGW(TAG, "OTA 未下发 websocket/mqtt 配置, 后端客户端不启动");
-            return;
-        }
-        use_ws_ = false;
-        ESP_LOGI(TAG, "使用 MQTT: %s topic=%s", endpoint.c_str(), publish_topic_.c_str());
     }
 
     xTaskCreate(TaskFunc, "backend", 8192, this, 5, &task_);
@@ -138,6 +138,9 @@ bool BackendClient::StartWebSocket() {
         OnText(std::string(data, len));
     });
 
+    ESP_LOGI(TAG, "连接 %s (token=%d字节, version=%d, free_heap=%lu)",
+             url.c_str(), (int)token.size(), ws_version_, (unsigned long)esp_get_free_heap_size());
+
     if (!ws_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "WebSocket 连接失败: %s", url.c_str());
         return false;
@@ -180,6 +183,9 @@ bool BackendClient::StartMqtt() {
         broker = endpoint.substr(0, pos);
         port = std::stoi(endpoint.substr(pos + 1));
     }
+
+    ESP_LOGI(TAG, "连接 MQTT %s:%d (topic=%s, keepalive=%d, free_heap=%lu)",
+             broker.c_str(), port, publish_topic_.c_str(), keepalive, (unsigned long)esp_get_free_heap_size());
 
     if (!mqtt_->Connect(broker, port, client_id, username, password)) {
         ESP_LOGE(TAG, "MQTT 连接失败: %s:%d", broker.c_str(), port);
@@ -248,10 +254,27 @@ void BackendClient::OnText(const std::string& text) {
             if (cJSON_GetObjectItem(payload, "method") != nullptr) HandleMcpPayload(payload);
         }
     } else if (strcmp(t, "llm") == 0) {
+        // 情绪下发 (主要来源)
         cJSON* emotion = cJSON_GetObjectItem(root, "emotion");
+        if (cJSON_IsString(emotion)) {
+            MoodState m = EmotionToMood(emotion->valuestring);
+            ESP_LOGI(TAG, ">>> 收到情绪下发: \"%s\" -> 触发 %s", emotion->valuestring, MoodName(m));
+            if (mood_) mood_->RequestExternalMood(m);
+        } else {
+            ESP_LOGW(TAG, "llm 消息缺少 emotion 字段: %.120s", text.c_str());
+        }
+    } else if (strcmp(t, "alert") == 0) {
+        // 告警也带 emotion (status / message / emotion)
+        cJSON* status = cJSON_GetObjectItem(root, "status");
+        cJSON* message = cJSON_GetObjectItem(root, "message");
+        cJSON* emotion = cJSON_GetObjectItem(root, "emotion");
+        ESP_LOGI(TAG, ">>> 收到告警: status=%s emotion=%s msg=%s",
+                 cJSON_IsString(status) ? status->valuestring : "(无)",
+                 cJSON_IsString(emotion) ? emotion->valuestring : "(无)",
+                 cJSON_IsString(message) ? message->valuestring : "(无)");
         if (cJSON_IsString(emotion) && mood_) {
             MoodState m = EmotionToMood(emotion->valuestring);
-            ESP_LOGI(TAG, "情绪下发: %s -> %s", emotion->valuestring, MoodName(m));
+            ESP_LOGI(TAG, "    告警情绪 -> 触发 %s", MoodName(m));
             mood_->RequestExternalMood(m);
         }
     } else if (strcmp(t, "system") == 0) {
@@ -262,7 +285,7 @@ void BackendClient::OnText(const std::string& text) {
             esp_restart();
         }
     }
-    // tts / stt / command / alert / goodbye 等忽略 (无语音)
+    // tts / stt / command / goodbye 等忽略 (无语音)
 
     cJSON_Delete(root);
 }
