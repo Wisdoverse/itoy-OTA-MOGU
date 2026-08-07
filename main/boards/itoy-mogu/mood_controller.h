@@ -53,6 +53,9 @@ public:
     void SetNightLight(bool on);  // 夜灯开关 (app 调用)
     // 后端下发情绪 -> 请求切到某状态 (线程安全: 仅置标志, 由 mood 任务下一 tick 应用)
     void RequestExternalMood(MoodState s);
+    // 调试用: 直接进入某状态, 重放入场 RGB + 手势; 不跑自动状态机/触摸轮询。
+    // 绕过 ChangeState 的去重 (state_ 先置非法值), 故可重复触发同一情绪。网页调试用。
+    void DemoState(MoodState s);
 
     MoodState state() const { return state_; }
 

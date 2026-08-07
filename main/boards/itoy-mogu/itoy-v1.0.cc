@@ -8,16 +8,17 @@
 #include <esp_log.h>
 
 #if CONFIG_ITOY_ENABLE_DEBUG_MODE
-// 调试模式: WiFi 热点 + 网页调试 (控电机/电位器/电池/触摸/日志), 跳过情绪与配网
+// 调试模式: WiFi 热点 + 网页调试 (控电机/电位器/电池/触摸/情绪演示/日志), 跳过配网
 #include "debug_web.h"
 #else
 // 正常模式: 情绪蘑菇 + IMU/配网
 #if CONFIG_ITOY_ENABLE_IMU
 #include "imu_qmi8658a.h"
 #endif
-#include "mood_controller.h"
 #include "backend_client.h"
 #endif
+// mood_controller: 正常模式跑完整状态机; 调试模式仅用 DemoState 重放手势供网页测试
+#include "mood_controller.h"
 
 #define TAG "ItoyMogu"
 
@@ -33,9 +34,9 @@ private:
 #if CONFIG_ITOY_ENABLE_IMU
     ImuQMI8658A imu_;
 #endif
-    MoodController mood_;
     BackendClient backend_;
 #endif
+    MoodController mood_;   // 正常=完整状态机; 调试=网页 DemoState 重放 (selftest 不用)
 
 public:
     ItoyMogu() {
@@ -72,12 +73,16 @@ public:
             vTaskDelay(pdMS_TO_TICKS(3000));
         }
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
-        // ---- 调试模式: 只初始化电机(含电池 ADC) + RGB; 跳过触摸/IMU/情绪 ----
+        // ---- 调试模式: 电机(含电池 ADC) + RGB + 触摸 + 情绪演示 ----
         motor_.Initialize();
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
         rgb_.Initialize();   // 默认熄灭
         touch_.Initialize(); // 触摸 (网页显示触摸值)
-        ESP_LOGI(TAG, "调试模式: motor + adc + rgb + touch 就绪 (网页由 StartNetwork 启动)");
+        motor_.StartMotorTask();   // 启动步进消费任务 -> 驱动情绪手势播放器 (PlayGesture)
+        // 情绪演示: 仅 Initialize 接指针, 不 Start() -> 不跑自动状态机/触摸轮询,
+        // 由网页 /api/mood -> DemoState() 手动触发各情绪的灯光+手势
+        mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
+        ESP_LOGI(TAG, "调试模式: motor + adc + rgb + touch + 情绪演示 就绪 (网页由 StartNetwork 启动)");
 #else
         // ---- 正常模式 ----
 #if CONFIG_ITOY_ENABLE_MOTOR
@@ -127,7 +132,7 @@ public:
 #if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
         ESP_LOGI(TAG, "电机自检模式: 跳过网络");
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
-        debug_.Start(&motor_, &power_, &touch_);
+        debug_.Start(&motor_, &power_, &touch_, &mood_);
 #else
         WifiBoard::StartNetwork();
 #endif
@@ -140,13 +145,13 @@ public:
 #endif
     }
 
-    // 暴露子系统给应用层 (调试模式下仅 motor/power/rgb 可用)
+    // 暴露子系统给应用层 (调试模式下仅 motor/power/rgb/mood 可用)
     MotorControl& GetMotor() { return motor_; }
     PowerControl& GetPower() { return power_; }
     RgbLed& GetRgb() { return rgb_; }
+    MoodController& GetMood() { return mood_; }
 #if !CONFIG_ITOY_ENABLE_DEBUG_MODE
     TouchPad& GetTouch() { return touch_; }
-    MoodController& GetMood() { return mood_; }
 #if CONFIG_ITOY_ENABLE_IMU
     ImuQMI8658A& GetImu() { return imu_; }
 #endif

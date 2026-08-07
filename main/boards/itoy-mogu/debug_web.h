@@ -10,11 +10,13 @@
 class MotorControl;
 class PowerControl;
 class TouchPad;
+class MoodController;
 
 class DebugWeb {
 public:
     // 启动 WiFi AP + HTTP 服务 (后台常驻), 立即返回
-    void Start(MotorControl* motor, PowerControl* power, TouchPad* touch);
+    // mood 用于网页"情绪演示"按钮 -> DemoState() 重放该情绪的灯光+手势
+    void Start(MotorControl* motor, PowerControl* power, TouchPad* touch, MoodController* mood);
 };
 
 #endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE

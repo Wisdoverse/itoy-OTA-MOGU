@@ -123,6 +123,15 @@ void MoodController::RequestExternalMood(MoodState s) {
     ESP_LOGI(TAG, "external mood requested: %s", StateName(s));
 }
 
+void MoodController::DemoState(MoodState s) {
+    // 调试演示: 不依赖状态机任务, 直接重放某状态的入场效果 (RGB + 电机手势)。
+    // 先把 state_ 置成一个非法值, 使 ChangeState 的 `if (s==state_) return` 不生效,
+    // 这样连续点同一个情绪也能每次重放。
+    ESP_LOGI(TAG, "demo -> %s", StateName(s));
+    state_ = static_cast<MoodState>(0xFF);
+    ChangeState(s);
+}
+
 void MoodController::TaskFunc(void* arg) {
     static_cast<MoodController*>(arg)->Loop();
 }
