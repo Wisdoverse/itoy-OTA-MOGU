@@ -90,7 +90,7 @@ static const char kIndexHtml[] =
 "<h2>电机控制</h2>"
 "步数:<input id='steps' type='number' value='1024' size='6'>"
 " ms/步:<input id='delay' type='number' value='4' size='4' min='1' max='20'>"
-"(不转就调大, 如 6/8)"
+"(如 6/8，参考电机规格书, 过快如1可能打滑，过慢10可能出现电机噪音)"
 "<br><button onclick=mv('a',1)>点头 +</button>"
 "<button onclick=mv('a',-1)>点头 −</button>"
 "<button class=b></button>"
