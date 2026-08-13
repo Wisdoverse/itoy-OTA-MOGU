@@ -56,6 +56,10 @@ void MdnsManager::Announce() {
 
     auto& board = Board::GetInstance();
     std::string mac = SystemInfo::GetMacAddress();           // "aa:bb:cc:dd:ee:ff" = Device-Id
+    if (mac.size() < 17) {                                   // 防御: 异常格式避免 substr 下溢致 terminate
+        ESP_LOGW(TAG, "MAC 格式异常, 跳过 mDNS 广播: '%s'", mac.c_str());
+        return;
+    }
     std::string hostname = "itoy-" + StripColons(mac);       // itoy-aabbccddeeff
 
     // 实例名 Itoy-XXXX: MAC 末 2 字节(冒号串末 5 字符)去冒号转大写
@@ -87,10 +91,14 @@ void MdnsManager::Announce() {
     }
     initialized_ = true;
 
-    mdns_hostname_set(hostname.c_str());
-    mdns_service_add(instance_name.c_str(),
+    esp_err_t e1 = mdns_hostname_set(hostname.c_str());
+    esp_err_t e2 = mdns_service_add(instance_name.c_str(),
                      MDNS_SERVICE, MDNS_PROTO, MDNS_PORT,
                      txt, sizeof(txt) / sizeof(txt[0]));
+    if (e1 != ESP_OK || e2 != ESP_OK) {
+        ESP_LOGW(TAG, "mdns 注册失败: hostname=%s service=%s",
+                 esp_err_to_name(e1), esp_err_to_name(e2));
+    }
 
     ESP_LOGI(TAG, "mDNS 广播: %s.local  %s.%s  实例=%s  id=%s  fw=%s",
              hostname.c_str(), MDNS_SERVICE, MDNS_PROTO,
