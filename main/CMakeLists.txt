@@ -28,7 +28,7 @@ list(APPEND SOURCES ${BOARD_SOURCES})
 
 idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
-                    REQUIRES driver app_update spi_flash nvs_flash efuse esp_app_format esp_adc led_strip wifi_provisioning esp_http_server esp_wifi esp_netif
+                    REQUIRES driver app_update spi_flash nvs_flash efuse esp_app_format esp_adc led_strip wifi_provisioning esp_http_server esp_wifi esp_netif mdns
                     WHOLE_ARCHIVE
                     )
 

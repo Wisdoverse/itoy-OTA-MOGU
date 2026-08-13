@@ -10,6 +10,7 @@ dependencies:
   espressif/esp_lcd_touch_cst816s: ^1.0.6
   lvgl/lvgl: ~9.3.0
   esp_lvgl_port: ~2.6.0
+  espressif/mdns: "^1"
 
   ## Required IDF version
   idf:
