@@ -21,6 +21,7 @@ enum MoodState : uint8_t {
     MOOD_DISTURBED,
     MOOD_LOW_BATTERY,
     MOOD_NIGHT_LIGHT,
+    MOOD_HEAD_TURN,      // 转头 (调试演示用: 点头+摇头联动扭脖)
 };
 
 // 内部事件
@@ -79,6 +80,7 @@ private:
     void GestureSleepy();
     void GestureDisturbed();
     void GestureLowBattery();
+    void GestureHeadTurn();
 
     TouchPad* touch_ = nullptr;
     MotorControl* motor_ = nullptr;

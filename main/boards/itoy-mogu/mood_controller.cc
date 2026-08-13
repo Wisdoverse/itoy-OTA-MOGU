@@ -43,10 +43,15 @@
 #define G_DEG_TILT_LOWBAT  5       // 低电: 轻微低头
 #define G_DEG_BREATH       6       // 深呼吸: 前倾幅度
 #define G_DEG_DISTURB      9       // 受扰: (md 8~10°)
+// 转头 (扭脖): 摇头为主、点头联动。半扫幅 = 中位->边的角度。
+// 注意: 幅度受电位器软限位制约 (中位±约 8~12° 内安全)。过大 -> "超出物理行程" / 撞限位动作错乱。
+#define G_DEG_TURN_SHAKE   8       // 转头: 左右半扫幅 (度) — 绝对位置 ±此值, 不要超过 ~12
+#define G_DEG_TURN_NOD     4       // 转头: 点头联动幅度 (度)
 // 速度 (每步延时 ms = MOTOR_STEP_DELAY_MS 倍数)
 #define SP_SLOW   (MOTOR_STEP_DELAY_MS * 5)
 #define SP_NORMAL (MOTOR_STEP_DELAY_MS * 2)
 #define SP_FAST   (MOTOR_STEP_DELAY_MS)
+#define SP_TURN   (MOTOR_STEP_DELAY_MS + 1)   // 转头: 3ms/步 (比 FAST 略慢, 平稳起转)
 
 // 调试: 心跳打印间隔 (ms), 0 = 关闭
 #define DBG_HEARTBEAT_MS   5000
@@ -63,6 +68,7 @@ static const char* StateName(MoodState s) {
         case MOOD_DISTURBED: return "DISTURBED";
         case MOOD_LOW_BATTERY: return "LOW_BATTERY";
         case MOOD_NIGHT_LIGHT: return "NIGHT_LIGHT";
+        case MOOD_HEAD_TURN: return "HEAD_TURN";
         default: return "?";
     }
 }
@@ -344,6 +350,8 @@ void MoodController::HandleEvent(MoodEvent ev) {
         case MOOD_NIGHT_LIGHT:
             if (ev == EVT_NIGHT_LIGHT_TOGGLE) ChangeState(MOOD_CALM);
             break;
+        case MOOD_HEAD_TURN:
+            break;   // 调试演示态: 不响应触摸事件, 仅由网页调试切换
     }
 }
 
@@ -397,6 +405,10 @@ void MoodController::ChangeState(MoodState s) {
         case MOOD_NIGHT_LIGHT:
             rgb_->Solid(WARM, 15);
             motor_->StopGesture();
+            break;
+        case MOOD_HEAD_TURN:
+            rgb_->Solid(WARM, CALM_BRIGHT_PCT);
+            GestureHeadTurn();
             break;
     }
 }
@@ -470,4 +482,22 @@ void MoodController::GestureLowBattery() {
     ESP_LOGI(TAG, "gesture LOW_BATT: tilt +%d deg", G_DEG_TILT_LOWBAT);
     GestureStep g[] = { {MOTOR_NOD, (int16_t)STEPS_FOR_DEG(G_DEG_TILT_LOWBAT), SP_SLOW} };
     motor_->PlayGesture(g, 1);
+}
+
+void MoodController::GestureHeadTurn() {
+    // 扭脖子: 点头+摇头联动, 看起来像人扭脖。
+    // 约定 (与其它手势一致): nod + = 抬头/仰, - = 低头; shake + = 右, - = 左。
+    // 轨迹 (nod, shake) 对角往返, 起止于中位:
+    //   蓄势 -> (低头,左); 左->右 先低头后抬头; 右->左 先仰头后低头; 收势 -> 回中。
+    // 各段增量和为 0, 动作结束后头回到起始 (中) 位。
+    ESP_LOGI(TAG, "gesture HEAD_TURN: shake ±%d deg, nod ±%d deg", G_DEG_TURN_SHAKE, G_DEG_TURN_NOD);
+    int16_t A = (int16_t)STEPS_FOR_DEG(G_DEG_TURN_SHAKE);   // 半扫幅 (中->边)
+    int16_t N = (int16_t)STEPS_FOR_DEG(G_DEG_TURN_NOD);     // 点头幅
+    DualGestureStep g[] = {
+        { (int16_t)(-N),      (int16_t)(-A),      SP_TURN },  // 蓄势 -> 左 + 低头
+        { (int16_t)(2 * N),   (int16_t)(2 * A),   SP_TURN },  // 左->右: 下->上 (先低后抬)
+        { (int16_t)(-2 * N),  (int16_t)(-2 * A),  SP_TURN },  // 右->左: 上->下 (先仰后低)
+        { (int16_t)(N),       (int16_t)(A),       SP_TURN },  // 收势 -> 回中
+    };
+    motor_->PlayDualGesture(g, 4, /*auto_home=*/true);   // 结束后自动回零位并断电
 }

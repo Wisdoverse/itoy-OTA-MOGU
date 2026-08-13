@@ -88,6 +88,7 @@ float StepperMotor::ReadPosition() const {
 }
 
 bool StepperMotor::CanStep(bool clockwise) const {
+#if MOTOR_HAS_POT
     uint32_t pot = ReadPotentiometer();
     // 该方向是否趋向电位器上限
     bool toward_max = (clockwise == pot_cw_inc_);
@@ -95,6 +96,10 @@ bool StepperMotor::CanStep(bool clockwise) const {
         return pot < pot_max_;
     }
     return pot > pot_min_;
+#else
+    (void)clockwise;
+    return true;   // 电位器未接入: 不做软限位, 靠步数累计 + 幅度参数约束行程
+#endif
 }
 
 bool StepperMotor::StepOnceLimited(bool clockwise) {
@@ -218,7 +223,8 @@ void MotorControl::Initialize() {
     step_mutex_ = xSemaphoreCreateMutex();
 
     initialized_ = true;
-    ESP_LOGI(TAG, "Motor control init (nod=41/40/48/47+CH5, shake=21/18/17/16+CH4)");
+    ESP_LOGI(TAG, "Motor control init (nod=41/40/48/47+CH5, shake=21/18/17/16+CH4, has_pot=%d)",
+             MOTOR_HAS_POT);
 }
 
 StepperMotor& MotorControl::GetMotor(MotorId id) {
@@ -257,14 +263,19 @@ void MotorControl::MotorLoop() {
     while (true) {
         int delay_ms = 50;
         xSemaphoreTake(step_mutex_, portMAX_DELAY);
-        if (gesture_active_) {
-            delay_ms = GestureTick();                 // 手势优先
+        if (dual_active_) {
+            delay_ms = DualGestureTick();             // 双轴手势优先 (转头等联动)
+        } else if (gesture_active_) {
+            delay_ms = GestureTick();                 // 单轴手势
+        } else if (homing_) {
+            delay_ms = HomeTick();                    // 回中 (按 pos_ 反向步进至 0)
         } else {
             bool any = false;
             for (int i = 0; i < MOTOR_COUNT; i++) {
                 int d = active_dir_[i];
                 if (d != 0) {
                     motors_[i]->StepOnceLimited(d > 0);
+                    pos_[i] += (d > 0) ? 1 : -1;      // 累计相对零位的偏移
                     any = true;
                 }
             }
@@ -306,6 +317,7 @@ int MotorControl::GestureTick() {
     const GestureStep& gs = gesture_[gesture_idx_];
     if (gs.motor < MOTOR_COUNT) {
         motors_[gs.motor]->StepOnceLimited(gs.steps >= 0);
+        pos_[gs.motor] += (gs.steps >= 0) ? 1 : -1;   // 累计相对零位的偏移
     }
     gesture_remaining_--;
     return gs.delay_ms ? gs.delay_ms : MOTOR_STEP_DELAY_MS;
@@ -315,6 +327,7 @@ void MotorControl::PlayGesture(const GestureStep* steps, int n) {
     if (!initialized_ || !steps || n <= 0) return;
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
+    dual_active_ = false;   // 取消双轴手势, 单轴优先
     int len = n > MAX_GESTURE_STEPS ? MAX_GESTURE_STEPS : n;
     for (int i = 0; i < len; i++) gesture_[i] = steps[i];
     gesture_len_ = len;
@@ -327,11 +340,98 @@ void MotorControl::PlayGesture(const GestureStep* steps, int n) {
     xSemaphoreGive(step_mutex_);
 }
 
+void MotorControl::PlayDualGesture(const DualGestureStep* steps, int n, bool auto_home) {
+    if (!initialized_ || !steps || n <= 0) return;
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
+    gesture_active_ = false;                                    // 双轴优先, 取消单轴手势
+    homing_ = false;                                            // 取消回中
+    dual_auto_home_ = auto_home;
+    int len = n > MAX_DUAL_GESTURE_STEPS ? MAX_DUAL_GESTURE_STEPS : n;
+    for (int i = 0; i < len; i++) dual_[i] = steps[i];
+    dual_len_ = len;
+    dual_idx_ = 0;
+    dual_active_ = true;
+    gesture_done_ = false;
+    DualSetupSegment();
+    ESP_LOGI(TAG, "dual gesture play: %d segs auto_home=%d (seg0: nod%d shake%d %dms)",
+             len, auto_home ? 1 : 0,
+             (int)dual_[0].nod_steps, (int)dual_[0].shake_steps, (int)dual_[0].delay_ms);
+    xSemaphoreGive(step_mutex_);
+}
+
+// 按 dual_[dual_idx_] 计算本段主/副轴参数。主轴 = 本段步数多的电机 (每 tick 走一步),
+// 副轴用 Bresenham 把它的步数均摊到主轴步数上。
+void MotorControl::DualSetupSegment() {
+    if (dual_idx_ >= dual_len_) { dual_active_ = false; gesture_done_ = true; return; }
+    const DualGestureStep& s = dual_[dual_idx_];
+    int na = std::abs((int)s.nod_steps);
+    int sa = std::abs((int)s.shake_steps);
+    dual_delay_ms_ = s.delay_ms ? s.delay_ms : MOTOR_STEP_DELAY_MS;
+    if (na >= sa) {
+        dual_major_motor_ = MOTOR_NOD;
+        dual_major_dir_   = (s.nod_steps >= 0) ? 1 : -1;
+        dual_minor_motor_ = MOTOR_SHAKE;
+        dual_minor_dir_   = (s.shake_steps >= 0) ? 1 : -1;
+        dual_major_total_ = na; dual_major_left_ = na; dual_minor_total_ = sa;
+    } else {
+        dual_major_motor_ = MOTOR_SHAKE;
+        dual_major_dir_   = (s.shake_steps >= 0) ? 1 : -1;
+        dual_minor_motor_ = MOTOR_NOD;
+        dual_minor_dir_   = (s.nod_steps >= 0) ? 1 : -1;
+        dual_major_total_ = sa; dual_major_left_ = sa; dual_minor_total_ = na;
+    }
+    dual_err_ = 0;
+}
+
+// 推进双轴手势一微步: 主轴走一步, 副轴按 Bresenham 误差决定是否走一步。返回本步延时。
+int MotorControl::DualGestureTick() {
+    // 当前段走完 -> 推进到下一段 (跳过空段)
+    while (dual_idx_ < dual_len_ && dual_major_left_ <= 0) {
+        dual_idx_++;
+        if (dual_idx_ >= dual_len_) {
+            DualGestureDone();
+            return 50;
+        }
+        DualSetupSegment();
+    }
+    if (dual_major_left_ <= 0) {     // 空播放 / 全部走完
+        DualGestureDone();
+        return 50;
+    }
+    // 主轴走一步
+    motors_[dual_major_motor_]->StepOnceLimited(dual_major_dir_ > 0);
+    pos_[dual_major_motor_] += dual_major_dir_;          // 累计相对零位的偏移
+    dual_major_left_--;
+    // 副轴: Bresenham 整数 DDA, 把 minor_total 步均摊到 major_total 步上
+    dual_err_ += dual_minor_total_;
+    if (dual_major_total_ > 0 && dual_err_ >= dual_major_total_) {
+        dual_err_ -= dual_major_total_;
+        motors_[dual_minor_motor_]->StepOnceLimited(dual_minor_dir_ > 0);
+        pos_[dual_minor_motor_] += dual_minor_dir_;
+    }
+    return dual_delay_ms_;
+}
+
+// 双轴手势结束: auto_home 则接着回中 (到位后断电), 否则立即断电防发热
+void MotorControl::DualGestureDone() {
+    dual_active_ = false;
+    gesture_done_ = true;
+    if (dual_auto_home_) {
+        home_steps_ = 0;
+        homing_ = true;        // 下一 tick 由 HomeTick 接管, 到位断电
+    } else {
+        StopAll();             // 立即断电
+    }
+}
+
 void MotorControl::StopGesture() {
     if (!initialized_) return;   // 未初始化 (电机被 menuconfig 关闭) 时安全跳过
     ESP_LOGI(TAG, "gesture stop");
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     gesture_active_ = false;
+    dual_active_ = false;
+    homing_ = false;
     gesture_done_ = true;
     for (int i = 0; i < MOTOR_COUNT; i++) {
         active_dir_[i] = 0;
@@ -341,28 +441,54 @@ void MotorControl::StopGesture() {
 }
 
 void MotorControl::Home() {
+    // 回中: 非阻塞。置 homing_, 电机任务用 HomeTick 按 pos_ 反向步进回零位, 到位断电。
     if (!initialized_) return;
-    GestureStep script[MOTOR_COUNT];
-    int n = 0;
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    gesture_active_ = false;
+    dual_active_ = false;
+    for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;
+    home_steps_ = 0;
+    homing_ = true;
+    xSemaphoreGive(step_mutex_);
+    ESP_LOGI(TAG, "home -> zero (pos nod=%ld shake=%ld)", (long)pos_[MOTOR_NOD], (long)pos_[MOTOR_SHAKE]);
+}
+
+void MotorControl::RecordZero() {
+    // 记录"当前位置 = 零位": 清零步数累计 pos_。断电。不依赖电位器。
+    if (!initialized_) return;
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    pos_[MOTOR_NOD] = 0;
+    pos_[MOTOR_SHAKE] = 0;
+    gesture_active_ = false;
+    dual_active_ = false;
+    homing_ = false;
+    for (int i = 0; i < MOTOR_COUNT; i++) { active_dir_[i] = 0; if (motors_[i]) motors_[i]->Stop(); }   // 断电
+    xSemaphoreGive(step_mutex_);
+    ESP_LOGI(TAG, "zero recorded (pos cleared)");
+}
+
+// 推进回中一微步: 每轴按 pos_ 反向走一步 (把累计偏移归零), 两轴 pos_ 都到 0 则断电结束。
+// 开环步数定位, 不读电位器。
+int MotorControl::HomeTick() {
+    bool done = true;
     for (int i = 0; i < MOTOR_COUNT; i++) {
-        uint32_t pot = motors_[i]->ReadPotentiometer();
-        uint32_t mid = (motors_[i]->pot_min() + motors_[i]->pot_max()) / 2;
-        int delta = (int)mid - (int)pot;
-        // 电位器增量 -> 步数 (启发式缩放, 需实测校准)
-        int steps = delta / 4;
-        if (motors_[i]->pot_cw_inc() == 0) steps = -steps;
-        if (steps > 300) steps = 300;
-        if (steps < -300) steps = -300;
-        if (steps != 0) {
-            script[n].motor = (uint8_t)i;
-            script[n].steps = (int16_t)steps;
-            script[n].delay_ms = (uint16_t)(MOTOR_STEP_DELAY_MS * 3);   // 回中慢速
-            n++;
-        }
+        if (pos_[i] == 0) continue;                 // 该轴已在零位
+        done = false;
+        bool cw = pos_[i] < 0;                       // pos>0 (走过 cw) -> 反向 ccw; pos<0 -> cw
+        motors_[i]->StepOnceLimited(cw);
+        pos_[i] += cw ? 1 : -1;                      // 朝 0 收敛
     }
-    ESP_LOGI(TAG, "home: motor0 %d steps, motor1 % d steps",
-             (int)script[0].steps, n > 1 ? (int)script[1].steps : 0);
-    PlayGesture(script, n);
+    if (++home_steps_ > 4096) done = true;           // 超限保护 (防卡死无限转)
+    if (done) {
+        homing_ = false;
+        StopAll();      // 到位断电, 防发热
+        gesture_done_ = true;
+        pos_[MOTOR_NOD] = 0;
+        pos_[MOTOR_SHAKE] = 0;
+        ESP_LOGI(TAG, "home done (steps=%d)", home_steps_);
+        return 50;
+    }
+    return MOTOR_STEP_DELAY_MS * 2;   // 回中略慢, 稳定起转
 }
 
 void MotorControl::NodSteps(int steps) {
@@ -384,6 +510,7 @@ void MotorControl::MoveSteps(MotorId id, int steps, int delay_ms) {
     if (delay_ms < 1) delay_ms = 3;
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     motors_[id]->StepRaw(steps, delay_ms);
+    pos_[id] += steps;        // 累计相对零位的偏移 (开环)
     motors_[id]->Stop();   // 走完立刻断电, 防止线圈持续通电发热
     xSemaphoreGive(step_mutex_);
 }

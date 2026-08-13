@@ -96,6 +96,9 @@ static const char kIndexHtml[] =
 "<button class=b></button>"
 "<button onclick=mv('b',1)>摇头 +</button>"
 "<button onclick=mv('b',-1)>摇头 −</button>"
+"<br><button onclick=zero('set') style='background:#06c;color:#fff'>记录零位</button>"
+"<button onclick=zero('go') style='background:#360;color:#fff'>回中</button>"
+"<span style='color:#aaa;font-size:13px'>手动把头摆到正中(不点头不摇头)再点「记录零位」设为零点;「回中」回到零点;每个动作做完也会自动回中并断电</span>"
 "<h2>情绪演示 (RGB+动作)</h2>"
 "<div style='margin-bottom:4px;color:#aaa;font-size:13px'>点一个 = 重放该情绪的灯光+电机手势 (可连点)</div>"
 "<button onclick=md(1)>开机</button>"
@@ -107,6 +110,7 @@ static const char kIndexHtml[] =
 "<button onclick=md(7)>受扰</button>"
 "<button onclick=md(8)>低电</button>"
 "<button onclick=md(9)>夜灯</button>"
+"<button onclick=md(10)>转头</button>"
 "<button onclick=md('stop') style='background:#a33;color:#fff'>停手势</button>"
 "<h2>状态</h2><div class=st id=state>读取中…</div>"
 "<h2>触摸 (GPIO1-4)</h2><div class=st id=touch>读取中…</div>"
@@ -128,6 +132,7 @@ static const char kIndexHtml[] =
 "if(Math.abs(s)>8192){alert('步数上限 8192');return;}"
 "await fetch('/api/motor?m='+m+'&dir='+dir+'&steps='+s+'&delay='+dl);}"
 "async function md(s){await fetch('/api/mood?s='+s);}"
+"async function zero(op){await fetch('/api/zero?op='+op);}"
 "state();log();setInterval(state,1000);setInterval(log,1000);"
 "</script></body></html>";
 
@@ -218,12 +223,38 @@ static esp_err_t handle_mood(httpd_req_t* req) {
         ESP_LOGI(TAG, "mood: stop gesture");
     } else {
         int s = atoi(val);
-        if (s < 0 || s > 9 || !s_mood) {
+        if (s < 0 || s > 10 || !s_mood) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad state");
             return ESP_OK;
         }
         ESP_LOGI(TAG, "mood demo: state=%d", s);
         s_mood->DemoState((MoodState)s);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// 零位: /api/zero?op=set -> 记录当前电位器读数为零位; op=go -> 回中(趋近零位并断电)
+static esp_err_t handle_zero(httpd_req_t* req) {
+    char query[24], val[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no query");
+        return ESP_OK;
+    }
+    if (httpd_query_key_value(query, "op", val, sizeof(val)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no op");
+        return ESP_OK;
+    }
+    if (strcmp(val, "set") == 0) {
+        if (s_motor) s_motor->RecordZero();
+        ESP_LOGI(TAG, "zero: record");
+    } else if (strcmp(val, "go") == 0) {
+        if (s_motor) s_motor->Home();
+        ESP_LOGI(TAG, "zero: go (home)");
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad op");
+        return ESP_OK;
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
@@ -335,12 +366,14 @@ static void StartHttp() {
     static const httpd_uri_t uri_state = { .uri="/api/state", .method=HTTP_GET, .handler=handle_state };
     static const httpd_uri_t uri_motor = { .uri="/api/motor", .method=HTTP_GET, .handler=handle_motor };
     static const httpd_uri_t uri_mood  = { .uri="/api/mood",  .method=HTTP_GET, .handler=handle_mood  };
+    static const httpd_uri_t uri_zero  = { .uri="/api/zero",  .method=HTTP_GET, .handler=handle_zero  };
     static const httpd_uri_t uri_log   = { .uri="/api/log",   .method=HTTP_GET, .handler=handle_log   };
     static const httpd_uri_t uri_catch = { .uri="/*",         .method=HTTP_GET, .handler=handle_catchall };
     httpd_register_uri_handler(server, &uri_root);
     httpd_register_uri_handler(server, &uri_state);
     httpd_register_uri_handler(server, &uri_motor);
     httpd_register_uri_handler(server, &uri_mood);
+    httpd_register_uri_handler(server, &uri_zero);
     httpd_register_uri_handler(server, &uri_log);
     httpd_register_uri_handler(server, &uri_catch);
 }

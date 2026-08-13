@@ -43,6 +43,11 @@
 #define POT_RANGE_MIN_PCT   10
 #define POT_RANGE_MAX_PCT   90
 
+// 电位器是否已接入: 0 = 还没接 (回中/零位改用步数累计的相对定位, 无软限位);
+//                   1 = 已接 (启用电位器软限位 CanStep; 回中仍用步数定位)
+// 接好电位器后改 1 即可, 无需改其它代码。
+#define MOTOR_HAS_POT       0
+
 // --- I2S 麦克风 (INMP441) ---
 // INMP441: WS, SD(OUT), SCK(BCLK) — 标准 I2S 从设备
 #define MIC_I2S_WS_GPIO     GPIO_NUM_8

@@ -89,6 +89,17 @@ struct GestureStep {
 
 #define MAX_GESTURE_STEPS 16
 
+// 双轴手势步: 两电机同步运动一段 (用于"转头"等需要点头+摇头联动的动作)。
+// nod_steps / shake_steps 为本段增量步数 (有符号), 由电机任务用 Bresenham 整数
+// 插值把副轴步数均摊到主轴步数上, 实现平滑的斜向/弧线联动。delay_ms = 主轴每步延时。
+struct DualGestureStep {
+    int16_t nod_steps;     // 本段点头电机增量 (+=抬头/仰, -=低头)
+    int16_t shake_steps;   // 本段摇头电机增量 (+=右, -=左)
+    uint16_t delay_ms;     // 单步延时 (速度) = 主轴每步间隔
+};
+
+#define MAX_DUAL_GESTURE_STEPS 16
+
 class MotorControl {
 public:
     MotorControl();
@@ -118,9 +129,13 @@ public:
     // ---- 非阻塞手势 (情绪状态用, 由电机任务播放) ----
     // 播放一段手势脚本 (拷贝到内部缓冲, 立即返回)
     void PlayGesture(const GestureStep* steps, int n);
+    // 播放一段双轴联动手势 (点头+摇头同步, Bresenham 插值; 用于"转头"等)。
+    // auto_home=true 时手势结束后自动回中并断电 (转头这类"动作"用; 保持姿态的情绪别开)
+    void PlayDualGesture(const DualGestureStep* steps, int n, bool auto_home = false);
     bool IsGestureDone() const { return gesture_done_; }
     void StopGesture();          // 立即停止手势/驱动并断电
-    void Home();                 // 两电机向中立位(电位器 50%)回中, 步数有上限
+    void Home();                 // 回中: 按 pos_ 反向步进回零位, 到位断电 (步数定位, 不依赖电位器)
+    void RecordZero();           // 记录当前位置为零位 (清零 pos_), 断电
 
     // 位置读取
     uint32_t ReadNodPosition();
@@ -131,7 +146,11 @@ public:
 private:
     static void MotorTaskFunc(void* arg);
     void MotorLoop();
-    int GestureTick();   // 推进手势一微步, 返回本步延时 ms
+    int GestureTick();          // 推进单轴手势一微步, 返回本步延时 ms
+    int DualGestureTick();      // 推进双轴手势一微步, 返回本步延时 ms
+    void DualSetupSegment();    // 按 dual_[idx] 计算本段主/副轴参数 (Bresenham)
+    void DualGestureDone();     // 双轴手势收尾: auto_home 则转回中, 否则断电
+    int HomeTick();             // 推进回中一微步 (按 pos_ 反向步进至 0), 返回本步延时
 
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     StepperMotor* motors_[MOTOR_COUNT]{};
@@ -148,6 +167,28 @@ private:
     int gesture_remaining_ = 0;
     volatile bool gesture_active_ = false;
     volatile bool gesture_done_ = true;
+
+    // 双轴手势播放器 (转头等联动动作)
+    DualGestureStep dual_[MAX_DUAL_GESTURE_STEPS]{};
+    int dual_len_ = 0;
+    int dual_idx_ = 0;
+    int dual_major_motor_ = 0;   // 本段主轴 (步数多者) MotorId
+    int dual_major_dir_ = 0;     // 主轴方向 ±1
+    int dual_major_left_ = 0;    // 本段主轴剩余步数 (= 本段 tick 数)
+    int dual_major_total_ = 0;   // 本段主轴总步数 (Bresenham 分母)
+    int dual_minor_motor_ = 0;   // 本段副轴 MotorId
+    int dual_minor_dir_ = 0;     // 副轴方向 ±1
+    int dual_minor_total_ = 0;   // 本段副轴总步数
+    int dual_err_ = 0;           // Bresenham 累计误差
+    uint16_t dual_delay_ms_ = 0;
+    volatile bool dual_active_ = false;
+
+    // 相对定位 (电位器未接入时): pos_ = 自"记录零位"以来的累计步数 (有符号, +=cw)。
+    // 回中即把 pos_ 反向步进归零。电位器接好后软限位由 CanStep 提供, 定位仍用步数。
+    int32_t pos_[MOTOR_COUNT] = {0, 0};
+    volatile bool homing_ = false;   // 回中模式 (电机任务按 pos_ 反向步进至 0, 到位断电)
+    int home_steps_ = 0;             // 回中步数累计 (超限保护)
+    bool dual_auto_home_ = false;    // 双轴手势结束后自动回中
 };
 
 #endif // MOTOR_CONTROL_H_
