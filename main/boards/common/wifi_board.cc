@@ -10,6 +10,7 @@
 #include <wifi_station.h>
 #include <wifi_configuration_ap.h>
 #include <ssid_manager.h>
+#include "mdns_manager.h"
 
 #if CONFIG_ITOY_PROVISIONING_BLE
 #include "wifi_provisioning_ble.h"
@@ -91,6 +92,9 @@ void WifiBoard::StartNetwork() {
 
     ESP_LOGI(TAG, "WiFi connected. SSID: %s, IP: %s",
              wifi_station.GetSsid().c_str(), wifi_station.GetIpAddress().c_str());
+
+    // STA 上线 → 启动 mDNS 广播, 供 App 局域网发现 (云端按 TXT id 绑定)
+    MdnsManager::GetInstance().Start();
 }
 
 NetworkInterface* WifiBoard::GetNetwork() {
