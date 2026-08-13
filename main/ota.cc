@@ -9,11 +9,6 @@
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
-#include <esp_efuse.h>
-#include <esp_efuse_table.h>
-#ifdef SOC_HMAC_SUPPORTED
-#include <esp_hmac.h>
-#endif
 
 #include <cstring>
 #include <vector>
@@ -24,18 +19,6 @@
 
 
 Ota::Ota() {
-#ifdef ESP_EFUSE_BLOCK_USR_DATA
-    // Read Serial Number from efuse user_data
-    uint8_t serial_number[33] = {0};
-    if (esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA, serial_number, 32 * 8) == ESP_OK) {
-        if (serial_number[0] == 0) {
-            has_serial_number_ = false;
-        } else {
-            serial_number_ = std::string(reinterpret_cast<char*>(serial_number), 32);
-            has_serial_number_ = true;
-        }
-    }
-#endif
 }
 
 Ota::~Ota() {
@@ -54,23 +37,13 @@ std::unique_ptr<Http> Ota::SetupHttp() {
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(0);
-    auto user_agent = SystemInfo::GetUserAgent();
-    http->SetHeader("Activation-Version", has_serial_number_ ? "2" : "1");
-    ESP_LOGI(TAG, "Setup HTTP, Activation-Version: %s", has_serial_number_ ? "2" : "1");
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     ESP_LOGI(TAG, "Setup HTTP, Device-Id: %s", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid());
     ESP_LOGI(TAG, "Setup HTTP, Client-Id: %s", board.GetUuid().c_str());
-    if (has_serial_number_) {
-        http->SetHeader("Serial-Number", serial_number_.c_str());
-        ESP_LOGI(TAG, "Setup HTTP, User-Agent: %s, Serial-Number: %s", user_agent.c_str(), serial_number_.c_str());
-    }
-    http->SetHeader("User-Agent", user_agent);
-    ESP_LOGI(TAG, "Setup HTTP, User-Agent: %s", user_agent.c_str());
+    http->SetHeader("User-Agent", SystemInfo::GetUserAgent());
     http->SetHeader("Accept-Language", LANG_CODE);
     http->SetHeader("Content-Type", "application/json");
-    ESP_LOGI(TAG, "Setup HTTP, Content-Type: application/json");
-
     return http;
 }
 
@@ -123,32 +96,6 @@ bool Ota::CheckVersion() {
     if (root == NULL) {
         ESP_LOGE(TAG, "Failed to parse JSON response");
         return false;
-    }
-
-    has_activation_code_ = false;
-    has_activation_challenge_ = false;
-    cJSON *activation = cJSON_GetObjectItem(root, "activation");
-    if (cJSON_IsObject(activation)) {
-        cJSON* message = cJSON_GetObjectItem(activation, "message");
-        if (cJSON_IsString(message)) {
-            activation_message_ = message->valuestring;
-        }
-        cJSON* code = cJSON_GetObjectItem(activation, "code");
-        if (cJSON_IsString(code)) {
-            activation_code_ = code->valuestring;
-            ESP_LOGI(TAG, "-------Ota activation code: %s", activation_code_.c_str());
-            has_activation_code_ = true;
-        }
-        cJSON* challenge = cJSON_GetObjectItem(activation, "challenge");
-        if (cJSON_IsString(challenge)) {
-            activation_challenge_ = challenge->valuestring;
-            ESP_LOGI(TAG, "-------Ota activation challenge: %s", activation_challenge_.c_str());
-            has_activation_challenge_ = true;
-        }
-        cJSON* timeout_ms = cJSON_GetObjectItem(activation, "timeout_ms");
-        if (cJSON_IsNumber(timeout_ms)) {
-            activation_timeout_ms_ = timeout_ms->valueint;
-        }
     }
 
     has_mqtt_config_ = false;
@@ -416,77 +363,4 @@ bool Ota::IsNewVersionAvailable(const std::string& currentVersion, const std::st
     }
     
     return newer.size() > current.size();
-}
-
-std::string Ota::GetActivationPayload() {
-    if (!has_serial_number_) {
-        return "{}";
-    }
-
-    std::string hmac_hex;
-#ifdef SOC_HMAC_SUPPORTED
-    uint8_t hmac_result[32]; // SHA-256 输出为32字节
-    
-    // 使用Key0计算HMAC
-    esp_err_t ret = esp_hmac_calculate(HMAC_KEY0, (uint8_t*)activation_challenge_.data(), activation_challenge_.size(), hmac_result);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "HMAC calculation failed: %s", esp_err_to_name(ret));
-        return "{}";
-    }
-
-    for (size_t i = 0; i < sizeof(hmac_result); i++) {
-        char buffer[3];
-        sprintf(buffer, "%02x", hmac_result[i]);
-        hmac_hex += buffer;
-    }
-#endif
-
-    cJSON *payload = cJSON_CreateObject();
-    cJSON_AddStringToObject(payload, "algorithm", "hmac-sha256");
-    cJSON_AddStringToObject(payload, "serial_number", serial_number_.c_str());
-    cJSON_AddStringToObject(payload, "challenge", activation_challenge_.c_str());
-    cJSON_AddStringToObject(payload, "hmac", hmac_hex.c_str());
-    auto json_str = cJSON_PrintUnformatted(payload);
-    std::string json(json_str);
-    cJSON_free(json_str);
-    cJSON_Delete(payload);
-
-    ESP_LOGI(TAG, "Activation payload: %s", json.c_str());
-    return json;
-}
-
-esp_err_t Ota::Activate() {
-    if (!has_activation_challenge_) {
-        ESP_LOGW(TAG, "No activation challenge found");
-        return ESP_FAIL;
-    }
-
-    std::string url = GetCheckVersionUrl();
-    if (url.back() != '/') {
-        url += "/activate";
-    } else {
-        url += "activate";
-    }
-
-    auto http = SetupHttp();
-
-    std::string data = GetActivationPayload();
-    http->SetContent(std::move(data));
-
-    if (!http->Open("POST", url)) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection");
-        return ESP_FAIL;
-    }
-    
-    auto status_code = http->GetStatusCode();
-    if (status_code == 202) {
-        return ESP_ERR_TIMEOUT;
-    }
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Activation successful");
-    return ESP_OK;
 }

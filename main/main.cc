@@ -15,14 +15,13 @@
 #define TAG "main"
 
 /**
- * 检查新版本并处理设备激活流程
+ * 检查新版本并拉取云端配置
  *
  * 流程：
  *   1. POST 设备信息到 OTA 服务器
- *   2. 服务器返回：固件版本/下载地址、MQTT/WebSocket 配置、激活码
+ *   2. 服务器返回：固件版本/下载地址、MQTT/WebSocket 配置、server_time
  *   3. 有新版本 → 自动下载升级并重启
- *   4. 有激活码 → 通过串口输出激活码，等待用户在小程序/网页绑定设备
- *   5. 激活成功 → 标记当前版本有效，流程结束
+ *   4. 标记当前版本有效（防止回滚），流程结束
  */
 #if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
 static void CheckNewVersion(Ota& ota) {
@@ -75,43 +74,6 @@ static void CheckNewVersion(Ota& ota) {
         // 标记当前版本有效（防止 OTA 回滚）
         ota.MarkCurrentVersionValid();
 
-        // 无需激活 → 完成
-        if (!ota.HasActivationCode() && !ota.HasActivationChallenge()) {
-            ESP_LOGI(TAG, "========== 设备已激活，无需绑定 ==========");
-            break;
-        }
-
-        // 有激活码 → 显示给用户
-        if (ota.HasActivationCode()) {
-            ESP_LOGI(TAG, "");
-            ESP_LOGI(TAG, "╔══════════════════════════════════════╗");
-            ESP_LOGI(TAG, "║        设备需要绑定激活              ║");
-            ESP_LOGI(TAG, "╠══════════════════════════════════════╣");
-            ESP_LOGI(TAG, "║  激活码: %-27s ║", ota.GetActivationCode().c_str());
-            if (!ota.GetActivationMessage().empty()) {
-                ESP_LOGI(TAG, "║  提示: %-29s ║", ota.GetActivationMessage().c_str());
-            }
-            ESP_LOGI(TAG, "║  请在控制台/小程序中输入激活码绑定   ║");
-            ESP_LOGI(TAG, "╚══════════════════════════════════════╝");
-            ESP_LOGI(TAG, "");
-        }
-
-        // 尝试激活（等待用户在服务器端完成绑定）
-        ESP_LOGI(TAG, "正在等待设备激活...");
-        for (int i = 0; i < 10; ++i) {
-            ESP_LOGI(TAG, "激活尝试 %d/%d", i + 1, 10);
-            esp_err_t err = ota.Activate();
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "========== 设备激活成功！ ==========");
-                break;
-            } else if (err == ESP_ERR_TIMEOUT) {
-                // 服务器要求继续等待
-                vTaskDelay(pdMS_TO_TICKS(3000));
-            } else {
-                ESP_LOGW(TAG, "激活失败，10秒后重试");
-                vTaskDelay(pdMS_TO_TICKS(10000));
-            }
-        }
         break;
     }
 
@@ -126,7 +88,7 @@ static void CheckNewVersion(Ota& ota) {
         ESP_LOGI(TAG, "已同步服务器时间");
     }
 
-    ESP_LOGI(TAG, "========== 版本检查与激活流程完成 ==========");
+    ESP_LOGI(TAG, "========== 版本检查流程完成 ==========");
 }
 #endif  // !CONFIG_ITOY_ENABLE_DEBUG_MODE
 
@@ -152,7 +114,7 @@ extern "C" void app_main(void)
     board.StartNetwork();
     ESP_LOGI(TAG, "========== 网络连接完成 ==========");
 
-    // OTA 检查版本 + 设备激活绑定
+    // OTA 检查版本 (固件 / MQTT / WebSocket 配置 / server_time)
     // 调试模式是 AP-only(无 STA), 跳过 OTA: 否则 OTA 里 GetBoardJson->GetRssi()
     // 会因无 STA 连接 ESP_ERROR_CHECK abort 导致重启循环。
 #if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
