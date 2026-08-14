@@ -3,6 +3,9 @@ build/
 tmp/
 releases/
 
+# Local-only design docs/specs (never upload)
+docs/
+
 # ESP-IDF generated
 sdkconfig.old
 sdkconfig
