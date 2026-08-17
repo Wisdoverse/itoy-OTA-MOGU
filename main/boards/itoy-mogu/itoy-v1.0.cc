@@ -132,7 +132,7 @@ public:
 #if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
         ESP_LOGI(TAG, "电机自检模式: 跳过网络");
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
-        debug_.Start(&motor_, &power_, &touch_, &mood_);
+        debug_.Start(&motor_, &power_, &touch_, &mood_, &rgb_);
 #else
         WifiBoard::StartNetwork();
 #endif

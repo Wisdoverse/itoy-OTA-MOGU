@@ -7,6 +7,7 @@
 #include "power_control.h"
 #include "touch_pad.h"
 #include "mood_controller.h"
+#include "rgb_led.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +35,7 @@ static MotorControl* s_motor = nullptr;
 static PowerControl* s_power = nullptr;
 static TouchPad* s_touch = nullptr;
 static MoodController* s_mood = nullptr;
+static RgbLed* s_rgb = nullptr;
 
 // 非阻塞电机指令: handler 填 s_cmd 后 give, MotorTask take 后执行 (大步数不卡网页)
 typedef struct { uint8_t motor; int eff; int delay_ms; } MotorCmd;
@@ -99,6 +101,15 @@ static const char kIndexHtml[] =
 "<br><button onclick=zero('set') style='background:#06c;color:#fff'>记录零位</button>"
 "<button onclick=zero('go') style='background:#360;color:#fff'>回中</button>"
 "<span style='color:#aaa;font-size:13px'>手动把头摆到正中(不点头不摇头)再点「记录零位」设为零点;「回中」回到零点;每个动作做完也会自动回中并断电</span>"
+"<h2>灯光控制</h2>"
+"<button onclick=rgbPreset(255,180,90,50) style='background:#ffb45a'>暖黄</button>"
+"<button onclick=rgbPreset(255,0,0,15) style='background:#a22;color:#fff'>暗红</button>"
+"<button onclick=rgbPreset(255,255,255,50) style='background:#fff;color:#111'>纯白</button>"
+"<button onclick=rgbOff() style='background:#a33;color:#fff'>关闭</button>"
+"<br>灯光调试: <input id='rgbc' type='color' value='#ffb45a'>"
+"<button onclick=rgbApply()>应用颜色</button>"
+"<br>亮度调试: <input id='rgbp' type='range' min=0 max=100 value=50 oninput=rgbBright(this.value)>"
+"<span id='rgbpv'>50</span>%"
 "<h2>情绪演示 (RGB+动作)</h2>"
 "<div style='margin-bottom:4px;color:#aaa;font-size:13px'>点一个 = 重放该情绪的灯光+电机手势 (可连点)</div>"
 "<button onclick=md(1)>开机</button>"
@@ -133,6 +144,16 @@ static const char kIndexHtml[] =
 "await fetch('/api/motor?m='+m+'&dir='+dir+'&steps='+s+'&delay='+dl);}"
 "async function md(s){await fetch('/api/mood?s='+s);}"
 "async function zero(op){await fetch('/api/zero?op='+op);}"
+"var rgbLast=[255,180,90],rgbT=null;"
+"function rgbSend(p){fetch('/api/rgb?r='+rgbLast[0]+'&g='+rgbLast[1]+'&b='+rgbLast[2]+'&p='+p);}"
+"function rgbPreset(r,g,b,p){rgbLast=[r,g,b];"
+"document.getElementById('rgbp').value=p;document.getElementById('rgbpv').textContent=p;rgbSend(p);}"
+"async function rgbOff(){await fetch('/api/rgb?off=1');}"
+"function rgbApply(){var h=document.getElementById('rgbc').value.slice(1);"
+"rgbLast=[parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];"
+"rgbSend(document.getElementById('rgbp').value);}"
+"function rgbBright(p){document.getElementById('rgbpv').textContent=p;"
+"clearTimeout(rgbT);rgbT=setTimeout(function(){rgbSend(p)},200);}"
 "state();log();setInterval(state,1000);setInterval(log,1000);"
 "</script></body></html>";
 
@@ -229,6 +250,39 @@ static esp_err_t handle_mood(httpd_req_t* req) {
         }
         ESP_LOGI(TAG, "mood demo: state=%d", s);
         s_mood->DemoState((MoodState)s);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// 灯光: /api/rgb?r=&g=&b=&p= -> Solid 直接点灯; /api/rgb?off=1 -> 熄灭
+// (与情绪演示共用 rgb_, 后点的覆盖先点的)
+static esp_err_t handle_rgb(httpd_req_t* req) {
+    char query[64], val[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no query");
+        return ESP_OK;
+    }
+    if (httpd_query_key_value(query, "off", val, sizeof(val)) == ESP_OK) {
+        if (s_rgb) s_rgb->Off();
+        ESP_LOGI(TAG, "rgb: off");
+    } else {
+        int r = 0, g = 0, b = 0, p = 50;
+        if (httpd_query_key_value(query, "r", val, sizeof(val)) == ESP_OK) r = atoi(val);
+        if (httpd_query_key_value(query, "g", val, sizeof(val)) == ESP_OK) g = atoi(val);
+        if (httpd_query_key_value(query, "b", val, sizeof(val)) == ESP_OK) b = atoi(val);
+        if (httpd_query_key_value(query, "p", val, sizeof(val)) == ESP_OK) p = atoi(val);
+        if (r < 0) r = 0;
+        if (r > 255) r = 255;
+        if (g < 0) g = 0;
+        if (g > 255) g = 255;
+        if (b < 0) b = 0;
+        if (b > 255) b = 255;
+        if (p < 0) p = 0;
+        if (p > 100) p = 100;
+        if (s_rgb) s_rgb->Solid((uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)p);
+        ESP_LOGI(TAG, "rgb: solid (%d,%d,%d) %d%%", r, g, b, p);
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
@@ -366,6 +420,7 @@ static void StartHttp() {
     static const httpd_uri_t uri_state = { .uri="/api/state", .method=HTTP_GET, .handler=handle_state };
     static const httpd_uri_t uri_motor = { .uri="/api/motor", .method=HTTP_GET, .handler=handle_motor };
     static const httpd_uri_t uri_mood  = { .uri="/api/mood",  .method=HTTP_GET, .handler=handle_mood  };
+    static const httpd_uri_t uri_rgb   = { .uri="/api/rgb",   .method=HTTP_GET, .handler=handle_rgb   };
     static const httpd_uri_t uri_zero  = { .uri="/api/zero",  .method=HTTP_GET, .handler=handle_zero  };
     static const httpd_uri_t uri_log   = { .uri="/api/log",   .method=HTTP_GET, .handler=handle_log   };
     static const httpd_uri_t uri_catch = { .uri="/*",         .method=HTTP_GET, .handler=handle_catchall };
@@ -373,16 +428,19 @@ static void StartHttp() {
     httpd_register_uri_handler(server, &uri_state);
     httpd_register_uri_handler(server, &uri_motor);
     httpd_register_uri_handler(server, &uri_mood);
+    httpd_register_uri_handler(server, &uri_rgb);
     httpd_register_uri_handler(server, &uri_zero);
     httpd_register_uri_handler(server, &uri_log);
     httpd_register_uri_handler(server, &uri_catch);
 }
 
-void DebugWeb::Start(MotorControl* motor, PowerControl* power, TouchPad* touch, MoodController* mood) {
+void DebugWeb::Start(MotorControl* motor, PowerControl* power, TouchPad* touch,
+                     MoodController* mood, RgbLed* rgb) {
     s_motor = motor;
     s_power = power;
     s_touch = touch;
     s_mood = mood;
+    s_rgb = rgb;
 
     LogCaptureInit();   // 尽早装日志捕获 (之后的日志都会进网页)
     StartSoftAp();
