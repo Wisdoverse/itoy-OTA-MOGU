@@ -18,6 +18,7 @@
 #define HOLD_ONE_MS       3000    // 单手 ≥3s
 #define HOLD_BOTH_MS      5000    // 双手 ≥5s
 #define NO_TOUCH_SLEEP_MS 600000  // 10min 无互动 -> 困倦
+#define AUTO_OFF_MS       300000  // 困倦中再无互动 5min -> 自动关机 (距末次互动共 15min)
 #define RAPID_WINDOW_MS   5000    // 频繁触摸窗口
 #define RAPID_COUNT       3       // 窗口内短按达此次数 -> 受扰
 
@@ -124,6 +125,7 @@ void MoodController::SetNightLight(bool on) {
 
 void MoodController::RequestExternalMood(MoodState s) {
     // 先写值再置标志, mood 任务下一 tick (≤100ms) 读到后应用. 关机态不打断.
+    last_touch_ms_ = tick_ms_;   // 远程互动也算"在用", 不触发无互动自动关机
     external_mood_ = s;
     pending_external_mood_ = true;
     ESP_LOGI(TAG, "external mood requested: %s", StateName(s));
@@ -168,6 +170,13 @@ void MoodController::Loop() {
                 if (tick_ms_ - last_touch_ms_ >= NO_TOUCH_SLEEP_MS) {
                     ESP_LOGI(TAG, "timeout no-touch 10min -> SLEEPY");
                     ChangeState(MOOD_SLEEPY);
+                }
+                break;
+            case MOOD_SLEEPY:
+                // 困倦中再无互动 -> 自动关机 (走 MOOD_OFF: 渐灭+回中+断电)
+                if (tick_ms_ - last_touch_ms_ >= AUTO_OFF_MS) {
+                    ESP_LOGI(TAG, "timeout sleepy no-touch 5min -> AUTO OFF");
+                    ChangeState(MOOD_OFF);
                 }
                 break;
             case MOOD_HAPPY:
