@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <cJSON.h>
 
 #include "board.h"
@@ -335,7 +336,17 @@ void BackendClient::HandleMcpPayload(const cJSON* payload) {
         cJSON* name = params ? cJSON_GetObjectItem(params, "name") : nullptr;
         if (cJSON_IsString(name) && strcmp(name->valuestring, "self.get_device_status") == 0) {
             std::string status = BuildDeviceStatusJson();
-            ESP_LOGI(TAG, "上报设备状态: %s", status.c_str());
+            // 串口同步打印: reparse 后缩进格式化成多行, 便于阅读 (云端仍收压缩 JSON)
+            if (cJSON* pretty = cJSON_Parse(status.c_str())) {
+                char* p = cJSON_Print(pretty);
+                if (p) {
+                    ESP_LOGI(TAG, "上报设备状态:\n%s", p);
+                    cJSON_free(p);
+                }
+                cJSON_Delete(pretty);
+            } else {
+                ESP_LOGI(TAG, "上报设备状态: %s", status.c_str());
+            }
             cJSON* result = cJSON_CreateObject();
             cJSON* content = cJSON_CreateArray();
             cJSON* item = cJSON_CreateObject();
@@ -388,7 +399,11 @@ cJSON* BackendClient::BuildToolsList() const {
     cJSON* tool = cJSON_CreateObject();
     cJSON_AddStringToObject(tool, "name", "self.get_device_status");
     cJSON_AddStringToObject(tool, "description",
-        "Provides the real-time status of the device: battery, wifi signal, touch, motor positions, mood.");
+        "Provides the real-time status of the device: battery, wifi signal, touch, motor positions, mood"
+#if CONFIG_ITOY_REPORT_DEBUG
+        ", debug/config values"
+#endif
+        ".");
     cJSON* schema = cJSON_CreateObject();
     cJSON_AddStringToObject(schema, "type", "object");
     cJSON_AddItemToObject(schema, "properties", cJSON_CreateObject());
@@ -447,6 +462,57 @@ std::string BackendClient::BuildDeviceStatusJson() const {
 
     // mood (扩展)
     cJSON_AddStringToObject(root, "mood", MoodName(mood_ ? mood_->state() : MOOD_OFF));
+
+#if CONFIG_ITOY_REPORT_DEBUG
+    // debug (扩展: sdkconfig 里按项开关, 见 "云端调试上报" 菜单)
+    cJSON* debug = cJSON_CreateObject();
+#if CONFIG_ITOY_REPORT_BUILD_CONFIG
+    cJSON* build = cJSON_CreateObject();
+#if CONFIG_ITOY_RUN_NORMAL
+    cJSON_AddStringToObject(build, "run_mode", "normal");
+#elif CONFIG_ITOY_ENABLE_DEBUG_MODE
+    cJSON_AddStringToObject(build, "run_mode", "debug");
+#else
+    cJSON_AddStringToObject(build, "run_mode", "motor_selftest");
+#endif
+#if CONFIG_ITOY_PROVISIONING_BLE
+    cJSON_AddStringToObject(build, "provisioning", "ble");
+#else
+    cJSON_AddStringToObject(build, "provisioning", "ap");
+#endif
+#ifdef CONFIG_ITOY_ENABLE_MOTOR
+    cJSON_AddBoolToObject(build, "motor", true);
+#else
+    cJSON_AddBoolToObject(build, "motor", false);
+#endif
+#ifdef CONFIG_ITOY_ENABLE_IMU
+    cJSON_AddBoolToObject(build, "imu", true);
+#else
+    cJSON_AddBoolToObject(build, "imu", false);
+#endif
+    cJSON_AddNumberToObject(build, "rgb_led_count", CONFIG_ITOY_RGB_LED_COUNT);
+    cJSON_AddNumberToObject(build, "touch_ratio", CONFIG_ITOY_TOUCH_RATIO);
+    cJSON_AddItemToObject(debug, "build", build);
+#endif  // ITOY_REPORT_BUILD_CONFIG
+#if CONFIG_ITOY_REPORT_TOUCH_PARAMS
+    cJSON* thr = cJSON_CreateArray();
+    cJSON* base = cJSON_CreateArray();
+    for (int i = 0; i < TOUCH_PAD_COUNT; i++) {
+        cJSON_AddItemToArray(thr, cJSON_CreateNumber((double)(touch_ ? touch_->GetThreshold(i) : 0)));
+        cJSON_AddItemToArray(base, cJSON_CreateNumber((double)(touch_ ? touch_->GetBaseline(i) : 0)));
+    }
+    cJSON_AddItemToObject(debug, "touch_threshold", thr);
+    cJSON_AddItemToObject(debug, "touch_baseline", base);
+#endif  // ITOY_REPORT_TOUCH_PARAMS
+#if CONFIG_ITOY_REPORT_BATTERY_MV
+    cJSON_AddNumberToObject(debug, "battery_mv", power_ ? power_->ReadBatteryMv() : 0);
+#endif
+#if CONFIG_ITOY_REPORT_RUNTIME
+    cJSON_AddNumberToObject(debug, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+    cJSON_AddNumberToObject(debug, "free_heap", (double)esp_get_free_heap_size());
+#endif
+    cJSON_AddItemToObject(root, "debug", debug);
+#endif  // ITOY_REPORT_DEBUG
 
     char* s = cJSON_PrintUnformatted(root);
     std::string json(s);

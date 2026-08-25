@@ -119,4 +119,39 @@ config ITOY_TOUCH_CH3_BASELINE
     int "CH3 (GPIO4) 触摸基线 (0=开机自动测量)"
     default 0
 
+# ---- 云端调试上报 (get_device_status 的 debug 节, 按项开关) ----
+config ITOY_REPORT_DEBUG
+    bool "上报调试信息到云端 (状态 JSON 增加 debug 节)"
+    default y
+    help
+        在 self.get_device_status 返回的 JSON 里附加 "debug" 对象,
+        与 battery / network / touch 等字段并列, 云端可直接读取。
+        关掉则完全不组 debug 节, 报文与以前逐字节一致。
+
+config ITOY_REPORT_BUILD_CONFIG
+    bool "上报编译配置 (运行模式/配网方式/电机/IMU/灯珠数/触摸倍率)"
+    default y
+    depends on ITOY_REPORT_DEBUG
+    help
+        把 sdkconfig 里的关键开关回报给云端, 用于确认设备跑的是哪套配置。
+
+config ITOY_REPORT_TOUCH_PARAMS
+    bool "上报触摸运行参数 (各通道阈值 + 开机校准基线)"
+    default y
+    depends on ITOY_REPORT_DEBUG
+    help
+        4 路通道的实际判定阈值和开机校准的空闲基线 (触摸调试用)。
+
+config ITOY_REPORT_BATTERY_MV
+    bool "上报电池电压 (mV)"
+    default y
+    depends on ITOY_REPORT_DEBUG
+    help
+        比 battery.level 的百分比更精确的原始电压。
+
+config ITOY_REPORT_RUNTIME
+    bool "上报运行状态 (开机时长秒 + 剩余堆内存)"
+    default y
+    depends on ITOY_REPORT_DEBUG
+
 endmenu

@@ -41,6 +41,9 @@ public:
     void SetThreshold(int channel, uint32_t threshold);
     uint32_t GetThreshold(int channel) const;
 
+    // 开机校准得到的空闲基线 (Calibrate 采样值, 供云端调试上报)
+    uint32_t GetBaseline(int channel) const { return baselines_[channel]; }
+
     // 校准: 采样空闲状态下的基准值, 阈值 = 基准值 * ratio
     void Calibrate(float ratio = 0.8f);
 
