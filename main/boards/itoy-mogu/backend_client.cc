@@ -1,5 +1,7 @@
 #include "backend_client.h"
 
+#include "rgb_led.h"
+
 #include <esp_log.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
@@ -37,12 +39,32 @@ static const char* MoodName(MoodState s) {
 
 BackendClient::BackendClient() {}
 
+// ---- 云端电机指令的后台执行 (MoveSteps 阻塞, 不能占网络回调任务) ----
+namespace {
+struct CloudMotorCmd {
+    MotorControl* motor;
+    MotorId id;
+    int steps;
+    int delay_ms;
+};
+volatile bool s_cloud_motor_busy = false;   // 同时只执行一条, 忙则拒绝
+
+void CloudMotorTask(void* arg) {
+    auto* c = static_cast<CloudMotorCmd*>(arg);
+    c->motor->MoveSteps(c->id, c->steps, c->delay_ms);
+    s_cloud_motor_busy = false;
+    delete c;
+    vTaskDelete(nullptr);
+}
+}  // namespace
+
 void BackendClient::Initialize(PowerControl* power, TouchPad* touch,
-                               MotorControl* motor, MoodController* mood) {
+                               MotorControl* motor, MoodController* mood, RgbLed* rgb) {
     power_ = power;
     touch_ = touch;
     motor_ = motor;
     mood_ = mood;
+    rgb_ = rgb;
 }
 
 BackendClient::~BackendClient() {
@@ -334,6 +356,7 @@ void BackendClient::HandleMcpPayload(const cJSON* payload) {
     } else if (m == "tools/call") {
         cJSON* params = cJSON_GetObjectItem(payload, "params");
         cJSON* name = params ? cJSON_GetObjectItem(params, "name") : nullptr;
+        cJSON* args = params ? cJSON_GetObjectItem(params, "arguments") : nullptr;
         if (cJSON_IsString(name) && strcmp(name->valuestring, "self.get_device_status") == 0) {
             std::string status = BuildDeviceStatusJson();
             // 串口同步打印: reparse 后缩进格式化成多行, 便于阅读 (云端仍收压缩 JSON)
@@ -347,18 +370,15 @@ void BackendClient::HandleMcpPayload(const cJSON* payload) {
             } else {
                 ESP_LOGI(TAG, "上报设备状态: %s", status.c_str());
             }
-            cJSON* result = cJSON_CreateObject();
-            cJSON* content = cJSON_CreateArray();
-            cJSON* item = cJSON_CreateObject();
-            cJSON_AddStringToObject(item, "type", "text");
-            cJSON_AddStringToObject(item, "text", status.c_str());  // cJSON 自动转义
-            cJSON_AddItemToArray(content, item);
-            cJSON_AddItemToObject(result, "content", content);
-            cJSON_AddBoolToObject(result, "isError", false);
-            SendMcpFrame(id, result, false);
+            SendToolText(id, status);
+        } else if (cJSON_IsString(name) && strcmp(name->valuestring, "self.control_motor") == 0) {
+            SendToolText(id, HandleControlMotor(args));
+        } else if (cJSON_IsString(name) && strcmp(name->valuestring, "self.control_light") == 0) {
+            SendToolText(id, HandleControlLight(args));
         } else {
             cJSON* e = cJSON_CreateObject();
-            cJSON_AddStringToObject(e, "message", ("Unknown tool: " + std::string(name->valuestring)).c_str());
+            cJSON_AddStringToObject(e, "message",
+                ("Unknown tool: " + (cJSON_IsString(name) ? std::string(name->valuestring) : std::string("?"))).c_str());
             SendMcpFrame(id, e, true);
         }
     } else {
@@ -392,6 +412,19 @@ void BackendClient::SendMcpFrame(int id, cJSON* result_or_error, bool is_error) 
     ESP_LOGI(TAG, "-> mcp reply id=%d", id);
 }
 
+// tools/call 统一回复: content[0].text = text (cJSON 自动转义)
+void BackendClient::SendToolText(int id, const std::string& text) {
+    cJSON* result = cJSON_CreateObject();
+    cJSON* content = cJSON_CreateArray();
+    cJSON* item = cJSON_CreateObject();
+    cJSON_AddStringToObject(item, "type", "text");
+    cJSON_AddStringToObject(item, "text", text.c_str());
+    cJSON_AddItemToArray(content, item);
+    cJSON_AddItemToObject(result, "content", content);
+    cJSON_AddBoolToObject(result, "isError", false);
+    SendMcpFrame(id, result, false);
+}
+
 cJSON* BackendClient::BuildToolsList() const {
     cJSON* result = cJSON_CreateObject();
     cJSON* tools = cJSON_CreateArray();
@@ -409,6 +442,36 @@ cJSON* BackendClient::BuildToolsList() const {
     cJSON_AddItemToObject(schema, "properties", cJSON_CreateObject());
     cJSON_AddItemToObject(tool, "inputSchema", schema);
     cJSON_AddItemToArray(tools, tool);
+
+    // 云端控制工具 (基础版): 电机 + 灯光, schema 用字面量解析
+    auto add_tool = [tools](const char* name, const char* desc, const char* schema_json) {
+        cJSON* t = cJSON_CreateObject();
+        cJSON_AddStringToObject(t, "name", name);
+        cJSON_AddStringToObject(t, "description", desc);
+        cJSON* sch = cJSON_Parse(schema_json);
+        if (!sch) sch = cJSON_CreateObject();
+        cJSON_AddItemToObject(t, "inputSchema", sch);
+        cJSON_AddItemToArray(tools, t);
+    };
+    add_tool("self.control_motor",
+        "Control the motors: motor=nod (head up/down) or shake (head left/right). "
+        "steps is signed, range +-2048 (about half a turn); optional speed_ms 1-20 (default 4). "
+        "Runs in background, one command at a time.",
+        "{\"type\":\"object\",\"properties\":{"
+        "\"motor\":{\"type\":\"string\",\"enum\":[\"nod\",\"shake\"]},"
+        "\"steps\":{\"type\":\"integer\",\"minimum\":-2048,\"maximum\":2048},"
+        "\"speed_ms\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20,\"default\":4}},"
+        "\"required\":[\"motor\",\"steps\"]}");
+    add_tool("self.control_light",
+        "Control the RGB light: action=solid (steady color) / breath (breathing effect) / off. "
+        "r,g,b are 0-255 (default 255), brightness is 0-100 (default 50).",
+        "{\"type\":\"object\",\"properties\":{"
+        "\"action\":{\"type\":\"string\",\"enum\":[\"solid\",\"breath\",\"off\"]},"
+        "\"r\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":255},"
+        "\"g\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":255},"
+        "\"b\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":255},"
+        "\"brightness\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100,\"default\":50}},"
+        "\"required\":[\"action\"]}");
 
     cJSON_AddItemToObject(result, "tools", tools);
     return result;
@@ -519,6 +582,87 @@ std::string BackendClient::BuildDeviceStatusJson() const {
     cJSON_free(s);
     cJSON_Delete(root);
     return json;
+}
+
+// ------------------------------------------------------------------ 云端控制
+
+// self.control_motor: {motor:"nod"|"shake", steps:有符号, speed_ms?:1~20}
+// MoveSteps 阻塞 (大步数十几秒), 丢后台任务执行; 同一时间只跑一条, 忙则拒绝
+std::string BackendClient::HandleControlMotor(const cJSON* args) {
+    if (!motor_) return "{\"ok\":false,\"error\":\"motor disabled\"}";
+    cJSON* jm = cJSON_GetObjectItem(args, "motor");
+    cJSON* js = cJSON_GetObjectItem(args, "steps");
+    if (!cJSON_IsString(jm) || !cJSON_IsNumber(js))
+        return "{\"ok\":false,\"error\":\"need motor(nod|shake) and steps\"}";
+
+    MotorId id;
+    if (strcmp(jm->valuestring, "nod") == 0) {
+        id = MOTOR_NOD;
+    } else if (strcmp(jm->valuestring, "shake") == 0) {
+        id = MOTOR_SHAKE;
+    } else {
+        return "{\"ok\":false,\"error\":\"motor must be nod or shake\"}";
+    }
+
+    int steps = (int)js->valuedouble;
+    if (steps > 2048) steps = 2048;    // 云端收紧到 ~半圈 (调试网页是 +-8192)
+    if (steps < -2048) steps = -2048;
+    int speed = 4;
+    cJSON* jv = cJSON_GetObjectItem(args, "speed_ms");
+    if (cJSON_IsNumber(jv)) speed = (int)jv->valuedouble;
+    if (speed < 1) speed = 1;
+    if (speed > 20) speed = 20;
+
+    if (s_cloud_motor_busy) return "{\"ok\":false,\"error\":\"motor busy, try later\"}";
+    auto* cmd = new CloudMotorCmd{motor_, id, steps, speed};
+    s_cloud_motor_busy = true;
+    if (xTaskCreate(CloudMotorTask, "cloud_motor", 4096, cmd, 5, nullptr) != pdPASS) {
+        s_cloud_motor_busy = false;
+        delete cmd;
+        return "{\"ok\":false,\"error\":\"task create failed\"}";
+    }
+    ESP_LOGI(TAG, "云端电机指令: %s steps=%d speed=%dms", jm->valuestring, steps, speed);
+    char buf[80];
+    snprintf(buf, sizeof(buf), "{\"ok\":true,\"motor\":\"%s\",\"steps\":%d}", jm->valuestring, steps);
+    return buf;
+}
+
+// self.control_light: {action:"solid"|"breath"|"off", r?, g?, b?, brightness?}
+std::string BackendClient::HandleControlLight(const cJSON* args) {
+    if (!rgb_) return "{\"ok\":false,\"error\":\"rgb disabled\"}";
+    cJSON* ja = cJSON_GetObjectItem(args, "action");
+    if (!cJSON_IsString(ja)) return "{\"ok\":false,\"error\":\"need action(solid|breath|off)\"}";
+    const char* act = ja->valuestring;
+
+    if (strcmp(act, "off") == 0) {
+        rgb_->Off();
+        ESP_LOGI(TAG, "云端灯光: off");
+        return "{\"ok\":true,\"action\":\"off\"}";
+    }
+    if (strcmp(act, "solid") != 0 && strcmp(act, "breath") != 0)
+        return "{\"ok\":false,\"error\":\"action must be solid, breath or off\"}";
+
+    // 缺省 r/g/b=255 (白), brightness=50; 全部限幅
+    auto clamp_arg = [args](const char* key, int lo, int hi, int dft) {
+        cJSON* j = cJSON_GetObjectItem(args, key);
+        int v = cJSON_IsNumber(j) ? (int)j->valuedouble : dft;
+        return v < lo ? lo : (v > hi ? hi : v);
+    };
+    int r = clamp_arg("r", 0, 255, 255);
+    int g = clamp_arg("g", 0, 255, 255);
+    int b = clamp_arg("b", 0, 255, 255);
+    int p = clamp_arg("brightness", 0, 100, 50);
+
+    if (strcmp(act, "solid") == 0) {
+        rgb_->Solid((uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)p);
+        ESP_LOGI(TAG, "云端灯光: solid (%d,%d,%d) %d%%", r, g, b, p);
+    } else {
+        rgb_->Breath((uint8_t)r, (uint8_t)g, (uint8_t)b, 4000, 20, 80);
+        ESP_LOGI(TAG, "云端灯光: breath (%d,%d,%d)", r, g, b);
+    }
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"ok\":true,\"action\":\"%s\",\"r\":%d,\"g\":%d,\"b\":%d}", act, r, g, b);
+    return buf;
 }
 
 // ------------------------------------------------------------------ 情绪映射

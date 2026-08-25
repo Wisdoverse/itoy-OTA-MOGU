@@ -13,6 +13,7 @@
 
 class WebSocket;
 class Mqtt;
+class RgbLed;
 struct cJSON;
 
 // 精简版小智 (xiaozhi) 后端客户端 — 无语音:
@@ -27,7 +28,7 @@ public:
 
     // 注入子系统指针 (与 MoodController 同模式: 默认构造 + Initialize)
     void Initialize(PowerControl* power, TouchPad* touch,
-                    MotorControl* motor, MoodController* mood);
+                    MotorControl* motor, MoodController* mood, RgbLed* rgb);
 
     // 读 NVS 配置, 选 WS 或 MQTT, 起连接/重连任务
     void Start();
@@ -48,8 +49,11 @@ private:
     // MCP
     void HandleMcpPayload(const cJSON* payload);
     void SendMcpFrame(int id, cJSON* result_or_error, bool is_error);
+    void SendToolText(int id, const std::string& text);   // content[0].text 回复
     cJSON* BuildToolsList() const;
     std::string BuildDeviceStatusJson() const;
+    std::string HandleControlMotor(const cJSON* args);    // self.control_motor
+    std::string HandleControlLight(const cJSON* args);    // self.control_light
 
     static MoodState EmotionToMood(const std::string& emotion);
     static void TaskFunc(void* arg);
@@ -58,6 +62,7 @@ private:
     TouchPad* touch_;
     MotorControl* motor_;
     MoodController* mood_;
+    RgbLed* rgb_;
 
     std::unique_ptr<WebSocket> ws_;
     std::unique_ptr<Mqtt> mqtt_;

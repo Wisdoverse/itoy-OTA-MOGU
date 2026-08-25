@@ -96,7 +96,7 @@ public:
 #endif
         mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
         mood_.Start();
-        backend_.Initialize(&power_, &touch_, &motor_, &mood_);
+        backend_.Initialize(&power_, &touch_, &motor_, &mood_, &rgb_);
 
 #if CONFIG_ITOY_ENABLE_MOTOR
         ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV, RGB=%dLEDs",
