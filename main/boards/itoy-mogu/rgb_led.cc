@@ -77,10 +77,22 @@ void RgbLed::Breath(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
     period_ms_ = period_ms;
     lo_pct_ = lo_pct;
     hi_pct_ = hi_pct;
+    breath_start_tick_ = tick_;   // 相位归零: 从 lo 升起, 不接全局 tick 的任意相位
+    breath_times_ = 0;            // 默认无限呼吸
     effect_ = RGB_BREATH;
     dirty_ = true;
     ESP_LOGI(TAG, "rgb BREATH (%d,%d,%d) %d%%<->%d%% per %lums",
              r, g, b, lo_pct, hi_pct, (unsigned long)period_ms);
+}
+
+// 呼吸 times 次后自动熄灭; 阻塞到播完, 保证开机/关机提示完整可见
+void RgbLed::BreathBurst(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
+                         uint8_t lo_pct, uint8_t hi_pct, uint8_t times) {
+    if (times == 0) return;
+    Breath(r, g, b, period_ms, lo_pct, hi_pct);
+    breath_times_ = times;   // 动画任务按次计数, 到时自动转 RGB_OFF
+    vTaskDelay(pdMS_TO_TICKS((uint32_t)times * period_ms_));
+    Off();   // 兜底熄灭 (动画任务一般已切 OFF)
 }
 
 void RgbLed::FadeTo(uint8_t r, uint8_t g, uint8_t b, uint8_t target_pct, uint32_t dur_ms) {
@@ -114,7 +126,13 @@ uint8_t RgbLed::ComputeBrightPct() {
             break;
         }
         case RGB_BREATH: {
-            uint32_t pos = (tick_ * 10) % period_ms_;
+            uint32_t elapsed = (tick_ - breath_start_tick_) * 10;
+            if (breath_times_ > 0 && elapsed >= period_ms_ * breath_times_) {
+                effect_ = RGB_OFF;   // 限定次数播完 -> 熄灭
+                pct = 0;
+                break;
+            }
+            uint32_t pos = elapsed % period_ms_;
             uint32_t half = period_ms_ / 2;
             if (half == 0) half = 1;
             int32_t frac;   // 0..1000 三角波

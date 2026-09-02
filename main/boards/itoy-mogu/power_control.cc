@@ -1,5 +1,6 @@
 #include "power_control.h"
 #include "config.h"
+#include "rgb_led.h"
 #include <esp_log.h>
 #include <esp_rom_sys.h>
 #include <esp_sleep.h>
@@ -16,8 +17,8 @@
 #define BATT_VOLTAGE_MIN_MV  3000   // 空电 3.0V
 #define BATT_VOLTAGE_MAX_MV  4200   // 满电 4.2V
 
-// 长按关机时间
-#define LONG_PRESS_MS        3000
+// 长按关机时间 (2s 触发软关机)
+#define LONG_PRESS_MS        2000
 
 PowerControl::PowerControl() {
     shutdown_sem_ = xSemaphoreCreateBinary();
@@ -81,21 +82,25 @@ void PowerControl::PowerMonitorTask(void* arg) {
 
     while (true) {
         if (self->power_key_pressed_) {
-            // 等待按键释放
-            while (gpio_get_level(POWER_ON_GPIO) == 0) {
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-
-            uint32_t press_duration = xTaskGetTickCount() * portTICK_PERIOD_MS
-                                       - self->power_key_press_time_;
             self->power_key_pressed_ = false;
-
-            ESP_LOGI(TAG, "Power key pressed for %lu ms", press_duration);
-
-            if (press_duration >= LONG_PRESS_MS && !self->shutdown_prevented_) {
-                ESP_LOGW(TAG, "Long press detected, shutting down...");
-                self->RequestShutdown();
+            // 按住期间累计时长, 达到长按阈值立即关机 (无需等按键抬起)
+            while (gpio_get_level(POWER_ON_GPIO) == 0) {
+                uint32_t held = xTaskGetTickCount() * portTICK_PERIOD_MS
+                                - self->power_key_press_time_;
+                if (held >= LONG_PRESS_MS) {
+                    if (self->shutdown_prevented_) {
+                        ESP_LOGI(TAG, "Power key held %lums, shutdown prevented",
+                                 (unsigned long)held);
+                    } else {
+                        ESP_LOGW(TAG, "Power key held %lums >= %d, shutting down...",
+                                 (unsigned long)held, LONG_PRESS_MS);
+                        self->RequestShutdown();   // 提示灯播完即断电, 正常不返回
+                    }
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
+            // 未到阈值就松开 = 短按, 忽略 (开机键无短按功能)
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -107,6 +112,16 @@ void PowerControl::RequestShutdown(ShutdownCallback pre_shutdown) {
 
     if (pre_shutdown) {
         pre_shutdown();
+    }
+
+    // 关机提示: 呼吸 BOOT_BREATH_TIMES 次 (低电量改红色), 播完再断电
+    if (indicator_) {
+        // ADC 未绑定 (mv=0) 视为电量未知, 不判低电
+        bool low = ReadBatteryMv() > 0 && ReadBatteryPercent() < BATT_LOW_PCT;
+        if (low) ESP_LOGW(TAG, "低电量关机 (%d%%), 提示灯改红色", ReadBatteryPercent());
+        const uint8_t g = low ? 0 : 255, b = low ? 0 : 255;
+        indicator_->BreathBurst(255, g, b, BOOT_BREATH_PERIOD_MS,
+                                BOOT_BREATH_LO_PCT, BOOT_BREATH_HI_PCT, BOOT_BREATH_TIMES);
     }
 
     // 执行关机
@@ -130,6 +145,10 @@ void PowerControl::SetBatteryAdc(adc_oneshot_unit_handle_t handle, adc_channel_t
     battery_adc_ = handle;
     battery_chan_ = channel;
     ESP_LOGI(TAG, "Battery ADC bound (shared handle)");
+}
+
+void PowerControl::SetIndicator(RgbLed* rgb) {
+    indicator_ = rgb;
 }
 
 int PowerControl::ReadBatteryMv() {

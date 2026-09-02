@@ -30,8 +30,7 @@
 #define T_COMFORT_REL  3000   // 安抚触摸结束后返回
 #define T_OFF_FADE     3000   // 关机渐灭后断电
 
-// 电池
-#define BATT_LOW_PCT      15
+// 电池 (BATT_LOW_PCT 挪到 config.h, 与开机/关机提示灯共用)
 #define BATT_RECOVER_PCT  15
 #define BATT_CHECK_MS     5000
 

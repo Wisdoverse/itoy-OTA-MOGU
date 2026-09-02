@@ -43,6 +43,15 @@
 #define POT_RANGE_MIN_PCT   10
 #define POT_RANGE_MAX_PCT   90
 
+// 低电量阈值 (%): 低于此值开机/关机提示灯改红色 (情绪状态机 LOW_BATTERY 共用)
+#define BATT_LOW_PCT            15
+
+// 开机/关机提示灯: 呼吸 N 次 (调试/正常模式都播; 低电量改红色)
+#define BOOT_BREATH_PERIOD_MS   1200  // 单次呼吸周期 (ms), 不快不慢
+#define BOOT_BREATH_TIMES       3     // 呼吸次数
+#define BOOT_BREATH_LO_PCT      5     // 呼吸亮度下限 (%)
+#define BOOT_BREATH_HI_PCT      80    // 呼吸亮度上限 (%)
+
 // 电位器是否已接入: 0 = 还没接 (回中/零位改用步数累计的相对定位, 无软限位);
 //                   1 = 已接 (启用电位器软限位 CanStep; 回中仍用步数定位)
 // 接好电位器后改 1 即可, 无需改其它代码。

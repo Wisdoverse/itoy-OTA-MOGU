@@ -34,6 +34,10 @@ public:
     // 呼吸, period_ms 周期, lo_pct/hi_pct 亮度范围
     void Breath(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
                 uint8_t lo_pct, uint8_t hi_pct);
+    // 呼吸 times 次后自动熄灭 (开机/关机提示); 阻塞 times*period_ms,
+    // 播放期间调用方让出灯光控制权, 返回时灯已灭
+    void BreathBurst(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms,
+                     uint8_t lo_pct, uint8_t hi_pct, uint8_t times);
     // 渐变到 target_pct 亮度, 时长 dur_ms, 完成后保持
     void FadeTo(uint8_t r, uint8_t g, uint8_t b, uint8_t target_pct, uint32_t dur_ms);
 
@@ -59,6 +63,8 @@ private:
     // breath / solid / fade 共用
     uint32_t period_ms_ = 4000;
     uint8_t lo_pct_ = 40, hi_pct_ = 60;
+    uint32_t breath_start_tick_ = 0;   // 呼吸相位起点 (每次 Breath 从 lo 升起)
+    uint8_t breath_times_ = 0;         // >0 = 呼吸 N 次后自动转 OFF (提示灯用)
     uint8_t cur_pct_ = 0;            // 当前保持亮度 (SOLID / FADE 终点)
     uint8_t fade_from_pct_ = 0;
     uint32_t fade_dur_ms_ = 2000;

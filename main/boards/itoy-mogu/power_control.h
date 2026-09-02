@@ -9,6 +9,8 @@
 #include <freertos/semphr.h>
 #include <functional>
 
+class RgbLed;
+
 // 电源控制:
 // GPIO39 (POWER_ON): 高电平维持 SY8089 EN 供电锁存
 // GPIO42 (POWER_LATCH): ON 信号, 拉低触发软关机
@@ -34,6 +36,9 @@ public:
 
     // 注入共享 ADC 句柄 (由 MotorControl 提供, 避免重复创建 ADC_UNIT_1)
     void SetBatteryAdc(adc_oneshot_unit_handle_t handle, adc_channel_t channel);
+
+    // 注入提示灯 (可选): 关机前白色呼吸 BOOT_BREATH_TIMES 次, 低电量改红色
+    void SetIndicator(RgbLed* rgb);
 
     // 软关机: 拉低 GPIO42, 系统将在几毫秒内断电
     // 可选: 执行 shutdown_cb 后再断电
@@ -68,6 +73,7 @@ private:
 
     adc_oneshot_unit_handle_t battery_adc_ = nullptr;
     adc_channel_t battery_chan_ = (adc_channel_t)0;
+    RgbLed* indicator_ = nullptr;
 };
 
 #endif // POWER_CONTROL_H_

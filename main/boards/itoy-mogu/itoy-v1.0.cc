@@ -38,6 +38,17 @@ private:
 #endif
     MoodController mood_;   // 正常=完整状态机; 调试=网页 DemoState 重放 (selftest 不用)
 
+    // 开机提示: 白色呼吸 BOOT_BREATH_TIMES 次 (低电量改红色); 调试/正常模式共用。
+    // 阻塞播完再继续初始化, 避免被后续灯光效果 (mood/调试网页) 覆盖掉
+    void PlayBootIndication() {
+        // ADC 未绑定 (mv=0, 如禁用电机的编译) 视为电量未知, 不判低电
+        bool low = power_.ReadBatteryMv() > 0 && power_.ReadBatteryPercent() < BATT_LOW_PCT;
+        if (low) ESP_LOGW(TAG, "低电量开机 (%d%%), 提示灯改红色", power_.ReadBatteryPercent());
+        const uint8_t g = low ? 0 : 255, b = low ? 0 : 255;
+        rgb_.BreathBurst(255, g, b, BOOT_BREATH_PERIOD_MS,
+                         BOOT_BREATH_LO_PCT, BOOT_BREATH_HI_PCT, BOOT_BREATH_TIMES);
+    }
+
 public:
     ItoyMogu() {
         ESP_LOGI(TAG, "初始化 itoy-mogu 开发板 (%s)",
@@ -78,6 +89,8 @@ public:
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
         rgb_.Initialize();   // 默认熄灭
         touch_.Initialize(); // 触摸 (网页显示触摸值)
+        power_.SetIndicator(&rgb_);   // 关机前呼吸提示
+        PlayBootIndication();         // 开机提示: 呼吸 3 次
         motor_.StartMotorTask();   // 启动步进消费任务 -> 驱动情绪手势播放器 (PlayGesture)
         // 情绪演示: 仅 Initialize 接指针, 不 Start() -> 不跑自动状态机/触摸轮询,
         // 由网页 /api/mood -> DemoState() 手动触发各情绪的灯光+手势
@@ -91,6 +104,8 @@ public:
 #endif
         rgb_.Initialize();
         touch_.Initialize();
+        power_.SetIndicator(&rgb_);   // 关机前呼吸提示
+        PlayBootIndication();         // 开机提示: 呼吸 3 次 (须在 mood_.Start() 前, 否则被情绪灯覆盖)
 #if CONFIG_ITOY_ENABLE_MOTOR
         motor_.StartMotorTask();
 #endif

@@ -65,7 +65,8 @@
 
 ## 5. 电源
 - 开机：SW4 → Q3 → GPIO39 拉低启动 → ESP32 启动后 GPIO42 置高锁存供电。
-- 关机：长按 SW4 ≥3s 软关机，或软件 `PowerControl::RequestShutdown()`（拉低 GPIO42）。
+- 开机提示：初始化后白色呼吸 3 次（`RgbLed::BreathBurst`，1.2s/次；调试/正常模式都播；低电量 `<15%` 改红色）。
+- 关机：长按 SW4 ≥2s 软关机，或软件 `PowerControl::RequestShutdown()`（拉低 GPIO42）；断电前同样呼吸 3 次（低电量红色）播完才断电。
 - 电池电压：`ReadBatteryMv()`，分压比 `BATT_DIVIDER_RATIO`（默认 2.0，待知 R6/R7 阻值后校准）。
 - ADC 共享：`MotorControl` 创建唯一 `ADC_UNIT_1` 单元，配置 3 通道（点头/摇头/电池）；`PowerControl::SetBatteryAdc()` 复用同一句柄，避免重复创建冲突。
 
