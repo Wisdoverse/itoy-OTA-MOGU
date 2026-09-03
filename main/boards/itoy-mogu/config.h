@@ -43,6 +43,13 @@
 #define POT_RANGE_MIN_PCT   10
 #define POT_RANGE_MAX_PCT   90
 
+// 电位器闭环回中 (menuconfig: ITOY_HOME_POT): 目标中位读数与容差
+// 实测机械中位读数 ~1900; 读数波动较大, 死区 ±POT_CENTER_TOL + 多次采样平均压噪声
+#define POT_NOD_CENTER_RAW      1900   // 点头电位器中位读数 (按实物标定)
+#define POT_SHAKE_CENTER_RAW    1900   // 摇头电位器中位读数 (按实物标定)
+#define POT_CENTER_TOL          80     // 死区: |读数-目标| <= 此值即认为到中位
+#define POT_CENTER_SAMPLES      8      // 每次判定的采样平均次数
+
 // 低电量阈值 (%): 低于此值开机/关机提示灯改红色 (情绪状态机 LOW_BATTERY 共用)
 #define BATT_LOW_PCT            15
 
@@ -52,9 +59,9 @@
 #define BOOT_BREATH_LO_PCT      5     // 呼吸亮度下限 (%)
 #define BOOT_BREATH_HI_PCT      80    // 呼吸亮度上限 (%)
 
-// 电位器是否已接入: 0 = 还没接 (回中/零位改用步数累计的相对定位, 无软限位);
-//                   1 = 已接 (启用电位器软限位 CanStep; 回中仍用步数定位)
-// 接好电位器后改 1 即可, 无需改其它代码。
+// 电位器是否已接入: 0 = 没接/未标定方向 (无软限位; 回中默认开环步数定位);
+//                   1 = 已接且方向已验证 (启用软限位 CanStep 防顶死)。
+// 回中方式另有 menuconfig 二选一 (ITOY_HOME_MODE: 开环步数 / 电位器闭环), 与此开关独立。
 #define MOTOR_HAS_POT       0
 
 // --- I2S 麦克风 (INMP441) ---

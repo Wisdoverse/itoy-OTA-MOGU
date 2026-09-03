@@ -83,6 +83,19 @@ uint32_t StepperMotor::ReadPotentiometer() const {
     return (uint32_t)raw;
 }
 
+// 连续采 samples 次取平均 — 电位器读数波动较大, 单次读数直接做闭环会抖
+uint32_t StepperMotor::ReadPotSmooth(int samples) const {
+    if (!adc_handle_) return 0;
+    if (samples <= 1) return ReadPotentiometer();
+    int64_t sum = 0;
+    for (int i = 0; i < samples; i++) {
+        int raw = 0;
+        adc_oneshot_read(adc_handle_, adc_channel_, &raw);
+        sum += raw;
+    }
+    return (uint32_t)(sum / samples);
+}
+
 float StepperMotor::ReadPosition() const {
     return (float)ReadPotentiometer() / (float)POT_MAX_VALUE;
 }
@@ -441,7 +454,7 @@ void MotorControl::StopGesture() {
 }
 
 void MotorControl::Home() {
-    // 回中: 非阻塞。置 homing_, 电机任务用 HomeTick 按 pos_ 反向步进回零位, 到位断电。
+    // 回中: 非阻塞。置 homing_, 电机任务用 HomeTick 走回中位, 到位断电。
     if (!initialized_) return;
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     gesture_active_ = false;
@@ -450,7 +463,12 @@ void MotorControl::Home() {
     home_steps_ = 0;
     homing_ = true;
     xSemaphoreGive(step_mutex_);
+#if CONFIG_ITOY_HOME_POT
+    ESP_LOGI(TAG, "home -> pot center %d/%d (nod=%lu shake=%lu)", POT_NOD_CENTER_RAW,
+             POT_SHAKE_CENTER_RAW, (unsigned long)ReadNodPosition(), (unsigned long)ReadShakePosition());
+#else
     ESP_LOGI(TAG, "home -> zero (pos nod=%ld shake=%ld)", (long)pos_[MOTOR_NOD], (long)pos_[MOTOR_SHAKE]);
+#endif
 }
 
 void MotorControl::RecordZero() {
@@ -467,10 +485,34 @@ void MotorControl::RecordZero() {
     ESP_LOGI(TAG, "zero recorded (pos cleared)");
 }
 
-// 推进回中一微步: 每轴按 pos_ 反向走一步 (把累计偏移归零), 两轴 pos_ 都到 0 则断电结束。
-// 开环步数定位, 不读电位器。
+// 推进回中一微步, 返回本步延时。两种方式 (menuconfig ITOY_HOME_MODE 二选一):
+//   开环 (默认): 每轴按 pos_ 反向走一步 (把累计偏移归零), 两轴 pos_ 都到 0 则断电结束。
+//   电位器闭环: 每轴采样电位器, 朝中位读数步进, 进死区即停 — 不依赖步数累计/记录零位。
 int MotorControl::HomeTick() {
     bool done = true;
+#if CONFIG_ITOY_HOME_POT
+    const uint32_t center[MOTOR_COUNT] = { POT_NOD_CENTER_RAW, POT_SHAKE_CENTER_RAW };
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+        StepperMotor* m = motors_[i];
+        int diff = (int)center[i] - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
+        if (std::abs(diff) <= POT_CENTER_TOL) continue;   // 该轴已进死区
+        done = false;
+        bool cw = (diff > 0) == m->pot_cw_inc();          // 需增大读数 -> 按 cw_inc 方向走
+        m->StepOnceLimited(cw);
+    }
+    if (++home_steps_ > MOTOR_STEPS_PER_REV) done = true; // 超限保护 (电位器没接/方向不对防狂转)
+    if (done) {
+        homing_ = false;
+        StopAll();      // 到位断电, 防发热
+        gesture_done_ = true;
+        pos_[MOTOR_NOD] = 0;      // 步数累计同步清零, 与物理中位对齐
+        pos_[MOTOR_SHAKE] = 0;
+        ESP_LOGI(TAG, "home done (pot, steps=%d, nod=%lu shake=%lu)", home_steps_,
+                 (unsigned long)motors_[MOTOR_NOD]->ReadPotSmooth(),
+                 (unsigned long)motors_[MOTOR_SHAKE]->ReadPotSmooth());
+        return 50;
+    }
+#else
     for (int i = 0; i < MOTOR_COUNT; i++) {
         if (pos_[i] == 0) continue;                 // 该轴已在零位
         done = false;
@@ -488,6 +530,7 @@ int MotorControl::HomeTick() {
         ESP_LOGI(TAG, "home done (steps=%d)", home_steps_);
         return 50;
     }
+#endif
     return MOTOR_STEP_DELAY_MS * 2;   // 回中略慢, 稳定起转
 }
 

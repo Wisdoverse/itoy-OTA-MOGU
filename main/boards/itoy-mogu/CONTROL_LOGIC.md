@@ -62,6 +62,7 @@
 | `NodSteps(int n)` / `ShakeSteps(int n)` | 点头/摇头固定步数（受软限位保护） |
 | `MoveToPercent(MotorId, 0~100)` | 步进到目标电位器百分比（带最大步数保护与 ~4% 死区） |
 | `ReadNod/ShakePosition()` | 读电位器原始值（0~4095） |
+| `Home()` / `HomeTick()` | 回中（手势结束/关机前自动调用）。方式 menuconfig 二选一（`ITOY_HOME_MODE`）：开环步数累计（默认）/ 电位器闭环（目标读数 `POT_xxx_CENTER_RAW`≈1900，死区 ±`POT_CENTER_TOL`=80，8 次采样平均压噪声，超限 1 圈保护） |
 
 ## 5. 电源
 - 开机：SW4 → Q3 → GPIO39 拉低启动 → ESP32 启动后 GPIO42 置高锁存供电。

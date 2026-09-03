@@ -53,6 +53,30 @@ config ITOY_ENABLE_MOTOR
         关闭则完全不初始化电机、不跑情绪里的电机手势
         (适合裸板调试 / 无电机时, 也省 ADC)。
 
+# ---- 电机回中方式 (二选一) ----
+choice ITOY_HOME_MODE
+    prompt "电机回中方式 (二选一)"
+    default ITOY_HOME_OPEN_LOOP
+    depends on ITOY_ENABLE_MOTOR
+    help
+        手势结束/关机前回到中位的方式。
+        电位器模式的目标中位读数在 config.h 的 POT_NOD_CENTER_RAW /
+        POT_SHAKE_CENTER_RAW (实测机械中位 ~1900; 读数有波动,
+        已用容差死区 + 多次采样平均压噪声, 见 POT_CENTER_TOL / SAMPLES)。
+
+    config ITOY_HOME_OPEN_LOOP
+        bool "开环回中 (步数累计, 默认)"
+        help
+            原方式: 按自"记录零位"以来的累计步数反向走回, 不依赖电位器。
+
+    config ITOY_HOME_POT
+        bool "电位器闭环回中 (需接电位器)"
+        help
+            采样电位器读数, 朝中位目标步进, 进死区即停 (两轴独立)。
+            方向由 config.h 的 MOTOR_xxx_POT_CW_INC 决定 — 若上电后
+            电机朝反方向走, 把对应项取反。
+endchoice
+
 # ---- 运行模式 (三选一, 互斥) ----
 choice ITOY_RUN_MODE
     prompt "运行模式 (三选一)"

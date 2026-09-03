@@ -45,6 +45,8 @@ public:
 
     // 读取电位器位置 (0~POT_MAX_VALUE)
     uint32_t ReadPotentiometer() const;
+    // 多次采样取平均压噪声 (读数波动大, 回中/闭环定位用)
+    uint32_t ReadPotSmooth(int samples = 8) const;
     float ReadPosition() const;
 
     void SetSpeed(int delay_ms);
@@ -134,8 +136,10 @@ public:
     void PlayDualGesture(const DualGestureStep* steps, int n, bool auto_home = false);
     bool IsGestureDone() const { return gesture_done_; }
     void StopGesture();          // 立即停止手势/驱动并断电
-    void Home();                 // 回中: 按 pos_ 反向步进回零位, 到位断电 (步数定位, 不依赖电位器)
-    void RecordZero();           // 记录当前位置为零位 (清零 pos_), 断电
+    void Home();                 // 回中: 到中位后断电。方式由 menuconfig ITOY_HOME_MODE 二选一 —
+                                 //   开环: 按 pos_ 反向步进回零位 (步数定位, 不依赖电位器)
+                                 //   电位器闭环: 朝 POT_xxx_CENTER_RAW 目标步进, 进死区即停
+    void RecordZero();           // 记录当前位置为零位 (清零 pos_), 断电。电位器闭环模式下回中不看 pos_
 
     // 位置读取
     uint32_t ReadNodPosition();
@@ -150,7 +154,7 @@ private:
     int DualGestureTick();      // 推进双轴手势一微步, 返回本步延时 ms
     void DualSetupSegment();    // 按 dual_[idx] 计算本段主/副轴参数 (Bresenham)
     void DualGestureDone();     // 双轴手势收尾: auto_home 则转回中, 否则断电
-    int HomeTick();             // 推进回中一微步 (按 pos_ 反向步进至 0), 返回本步延时
+    int HomeTick();             // 推进回中一微步 (开环: 按 pos_ 至 0 / 电位器: 至中位读数), 返回本步延时
 
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     StepperMotor* motors_[MOTOR_COUNT]{};

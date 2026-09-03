@@ -545,6 +545,11 @@ std::string BackendClient::BuildDeviceStatusJson() const {
 #endif
 #ifdef CONFIG_ITOY_ENABLE_MOTOR
     cJSON_AddBoolToObject(build, "motor", true);
+#if CONFIG_ITOY_HOME_POT
+    cJSON_AddStringToObject(build, "home_mode", "pot");        // 电位器闭环回中
+#else
+    cJSON_AddStringToObject(build, "home_mode", "open_loop");  // 开环步数回中
+#endif
 #else
     cJSON_AddBoolToObject(build, "motor", false);
 #endif
