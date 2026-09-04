@@ -43,13 +43,9 @@
 - 松开 → 该电机断电（线圈 off），不发热。
 
 ### 电位器软限位（防机械顶死）
-- 每次步进前读该轴电位器；超出 `[POT_RANGE_MIN_PCT, POT_RANGE_MAX_PCT]`（默认 10%~90% 量程）则该方向停止并断电。
-- 反方向仍可移动。限位值在 `config.h` 的 `POT_RANGE_MIN_PCT / POT_RANGE_MAX_PCT` 调。
-
-### 方向反转开关
-- 实际转动方向与预期相反时，改 `config.h`：
-  - `MOTOR_NOD_INVERT = 1` / `MOTOR_SHAKE_INVERT = 1` —— 翻转正负方向。
-  - `MOTOR_NOD_POT_CW_INC` / `MOTOR_SHAKE_POT_CW_INC` —— 正转是否使电位器读数增大；**若软限位在刚起步就立刻触发，把对应项取反**。
+- 每次步进前读该轴电位器；超出每轴电子限位则该方向停止并断电，反方向仍可移动。
+- 限位 = 实测满行程（2026-09-03）内缩 `POT_LIMIT_MARGIN`=40：点头 `[1340, 2530]`（抬头 1300 / 低头 2570），摇头 `[1540, 2280]`（左 1500 / 右 2320）。数值在 `config.h` 的 `POT_xxx_*_RAW` 调。
+- 方向标定：`MOTOR_NOD_POT_CW_INC=1`（待实测）/ `MOTOR_SHAKE_POT_CW_INC=0`（实测正转读数减小）。
 
 ## 4. 手势 API（供应用层 / AI 后续调用）
 
@@ -62,7 +58,8 @@
 | `NodSteps(int n)` / `ShakeSteps(int n)` | 点头/摇头固定步数（受软限位保护） |
 | `MoveToPercent(MotorId, 0~100)` | 步进到目标电位器百分比（带最大步数保护与 ~4% 死区） |
 | `ReadNod/ShakePosition()` | 读电位器原始值（0~4095） |
-| `Home()` / `HomeTick()` | 回中（手势结束/关机前自动调用）。方式 menuconfig 二选一（`ITOY_HOME_MODE`）：开环步数累计（默认）/ 电位器闭环（目标读数 `POT_xxx_CENTER_RAW`≈1900，死区 ±`POT_CENTER_TOL`=80，8 次采样平均压噪声，超限 1 圈保护） |
+| `Home()` / `HomeTick()` | 回中（手势结束/关机前自动调用）：任意位置回到中位 1900/1900。方式 menuconfig 二选一（`ITOY_HOME_MODE`）：开环步数累计 / 电位器闭环（单次波动 ±20 → 8 次平均 ~±7，死区 ±`POT_CENTER_TOL`=30） |
+| `PlayPosGesture()` | 位置手势（电位器模式专属）：双轴各自朝目标读数闭环步进、按段播放；结束后回中（`auto_center`）或保持末段姿态断电。情绪手势全部为位置语义：目标 = 中位 ± 满行程百分比（`NodPos/ShakePos`），如"点头"=走向低头端 2570 |
 
 ## 5. 电源
 - 开机：SW4 → Q3 → GPIO39 拉低启动 → ESP32 启动后 GPIO42 置高锁存供电。

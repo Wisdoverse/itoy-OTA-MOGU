@@ -39,15 +39,18 @@
 #define POT_ADC_WIDTH       ADC_BITWIDTH_12
 #define POT_MAX_VALUE       4095
 
-// 电位器软限位 (量程百分比, 防止机械顶死), 可按实物调
-#define POT_RANGE_MIN_PCT   10
-#define POT_RANGE_MAX_PCT   90
+// 实测结构满行程电位器读数 (2026-09-03) — 电子限位 + 位置手势基准
+#define POT_NOD_UP_RAW      1300   // 点头轴: 抬头最大 (读数小端)
+#define POT_NOD_DOWN_RAW    2570   // 点头轴: 低头最大 (读数大端)
+#define POT_SHAKE_LEFT_RAW  1500   // 摇头轴: 左摆最大
+#define POT_SHAKE_RIGHT_RAW 2320   // 摇头轴: 右摆最大
+#define POT_LIMIT_MARGIN    40     // 电子限位从极限内缩量 (读数噪声 ±20 的 2 倍)
 
 // 电位器闭环回中 (menuconfig: ITOY_HOME_POT): 目标中位读数与容差
-// 实测机械中位读数 ~1900; 读数波动较大, 死区 ±POT_CENTER_TOL + 多次采样平均压噪声
+// 实测机械中位读数 ~1900, 单次读数波动约 ±20 -> 8 次采样平均压到 ~±7, 死区留 ±30
 #define POT_NOD_CENTER_RAW      1900   // 点头电位器中位读数 (按实物标定)
 #define POT_SHAKE_CENTER_RAW    1900   // 摇头电位器中位读数 (按实物标定)
-#define POT_CENTER_TOL          80     // 死区: |读数-目标| <= 此值即认为到中位
+#define POT_CENTER_TOL          30     // 死区: |读数-目标| <= 此值即认为到中位
 #define POT_CENTER_SAMPLES      8      // 每次判定的采样平均次数
 
 // 低电量阈值 (%): 低于此值开机/关机提示灯改红色 (情绪状态机 LOW_BATTERY 共用)
@@ -59,10 +62,9 @@
 #define BOOT_BREATH_LO_PCT      5     // 呼吸亮度下限 (%)
 #define BOOT_BREATH_HI_PCT      80    // 呼吸亮度上限 (%)
 
-// 电位器是否已接入: 0 = 没接/未标定方向 (无软限位; 回中默认开环步数定位);
-//                   1 = 已接且方向已验证 (启用软限位 CanStep 防顶死)。
+// 电位器: 已装 + 行程已实测标定 -> 启用软限位 CanStep (满行程内缩 POT_LIMIT_MARGIN, 防顶死)。
 // 回中方式另有 menuconfig 二选一 (ITOY_HOME_MODE: 开环步数 / 电位器闭环), 与此开关独立。
-#define MOTOR_HAS_POT       0
+#define MOTOR_HAS_POT       1
 
 // --- I2S 麦克风 (INMP441) ---
 // INMP441: WS, SD(OUT), SCK(BCLK) — 标准 I2S 从设备
@@ -131,8 +133,9 @@
 #define MOTOR_SELFTEST_REV        13     // 正/反各转多少圈 (8192 步/圈; 13 圈≈每个方向 ~10 分钟)
 
 // 电位器方向标定: 正转(cw)是否使该轴电位器读数增大
-// 1 = 增大, 0 = 减小。实测若软限位在刚起步就立即触发, 把对应项取反
+// 1 = 增大, 0 = 减小。方向反了表现为: 闭环回中朝一个方向一直走、读数离目标越来越远。
+// 实测 2026-09-03: 摇头(shake)正转读数减小 -> 0; 点头(nod) 暂按 1, 待实测
 #define MOTOR_NOD_POT_CW_INC   1
-#define MOTOR_SHAKE_POT_CW_INC 1
+#define MOTOR_SHAKE_POT_CW_INC 0
 
 #endif // _BOARD_CONFIG_H_

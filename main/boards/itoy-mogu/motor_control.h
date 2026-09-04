@@ -102,6 +102,17 @@ struct DualGestureStep {
 
 #define MAX_DUAL_GESTURE_STEPS 16
 
+#if CONFIG_ITOY_HOME_POT
+// 位置手势段 (电位器闭环): 双轴各自朝目标读数步进, 各自进死区即停, 两轴到齐进下一段。
+// 目标填 -1 = 该轴本段不动。目标会被自动夹进 [电子限位±死区] 内。
+struct PosStep {
+    int16_t nod_target;     // 点头目标读数 (低头=大, 抬头=小)
+    int16_t shake_target;   // 摇头目标读数 (右=大, 左=小)
+    uint16_t delay_ms;      // 每步延时 (速度)
+};
+#define MAX_POS_STEPS 12
+#endif  // CONFIG_ITOY_HOME_POT
+
 class MotorControl {
 public:
     MotorControl();
@@ -134,6 +145,11 @@ public:
     // 播放一段双轴联动手势 (点头+摇头同步, Bresenham 插值; 用于"转头"等)。
     // auto_home=true 时手势结束后自动回中并断电 (转头这类"动作"用; 保持姿态的情绪别开)
     void PlayDualGesture(const DualGestureStep* steps, int n, bool auto_home = false);
+#if CONFIG_ITOY_HOME_POT
+    // 播放位置手势 (电位器闭环): 依次走到各段目标读数。
+    // auto_center=true 结束后自动回中位(1900/1900)再断电; false 末段到位即断电保持姿态。
+    void PlayPosGesture(const PosStep* steps, int n, bool auto_center = true);
+#endif
     bool IsGestureDone() const { return gesture_done_; }
     void StopGesture();          // 立即停止手势/驱动并断电
     void Home();                 // 回中: 到中位后断电。方式由 menuconfig ITOY_HOME_MODE 二选一 —
@@ -155,6 +171,9 @@ private:
     void DualSetupSegment();    // 按 dual_[idx] 计算本段主/副轴参数 (Bresenham)
     void DualGestureDone();     // 双轴手势收尾: auto_home 则转回中, 否则断电
     int HomeTick();             // 推进回中一微步 (开环: 按 pos_ 至 0 / 电位器: 至中位读数), 返回本步延时
+#if CONFIG_ITOY_HOME_POT
+    int PosTick();              // 推进位置手势一微步 (两轴各朝本段目标读数), 返回本步延时
+#endif
 
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     StepperMotor* motors_[MOTOR_COUNT]{};
@@ -186,6 +205,18 @@ private:
     int dual_err_ = 0;           // Bresenham 累计误差
     uint16_t dual_delay_ms_ = 0;
     volatile bool dual_active_ = false;
+
+#if CONFIG_ITOY_HOME_POT
+    // 位置手势播放器 (电位器闭环); 数组名 pos_seq_ 避开开环步数累计 pos_[]
+    PosStep pos_seq_[MAX_POS_STEPS]{};
+    int pos_len_ = 0;
+    int pos_idx_ = 0;
+    int pos_seg_steps_ = 0;                 // 本段步数 (超限跳段保护)
+    bool pos_nod_done_ = false;             // 本段点头轴已到目标
+    bool pos_shake_done_ = false;           // 本段摇头轴已到目标
+    volatile bool pos_active_ = false;
+    bool pos_auto_center_ = false;          // 结束后自动回中
+#endif
 
     // 相对定位 (电位器未接入时): pos_ = 自"记录零位"以来的累计步数 (有符号, +=cw)。
     // 回中即把 pos_ 反向步进归零。电位器接好后软限位由 CanStep 提供, 定位仍用步数。

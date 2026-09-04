@@ -47,6 +47,22 @@
 // 注意: 幅度受电位器软限位制约 (中位±约 8~12° 内安全)。过大 -> "超出物理行程" / 撞限位动作错乱。
 #define G_DEG_TURN_SHAKE   8       // 转头: 左右半扫幅 (度) — 绝对位置 ±此值, 不要超过 ~12
 #define G_DEG_TURN_NOD     4       // 转头: 点头联动幅度 (度)
+
+#if CONFIG_ITOY_HOME_POT
+// 位置手势幅度: 中位 ± 满行程百分比 (点头>0=低头, 摇头>0=向右), 实测行程见 config.h
+// 100% = 该方向电子限位端; 实际目标会被夹进 [限位±死区]
+#define P_NOD_OPEN       (-30)  // 开机: 轻微仰头
+#define P_NOD_HAPPY      30     // 开心: 轻点头
+#define P_WIG_HAPPY      65     // 开心: 左右摆幅
+#define P_TILT_COMFORT   35     // 安抚: 前倾保持
+#define P_BREATH         45     // 深呼吸: 前倾幅度
+#define P_TILT_SLEEP     45     // 困倦: 低头保持
+#define P_DISTURB_NOD    55     // 受扰: 快速低头
+#define P_DISTURB_WIG    70     // 受扰: 左右甩幅
+#define P_TILT_LOWBAT    20     // 低电: 轻微低头
+#define P_TURN_SHAKE     70     // 转头: 左右扫幅
+#define P_TURN_NOD       30     // 转头: 点头联动幅
+#endif
 // 速度 (每步延时 ms = MOTOR_STEP_DELAY_MS 倍数)
 #define SP_SLOW   (MOTOR_STEP_DELAY_MS * 5)
 #define SP_NORMAL (MOTOR_STEP_DELAY_MS * 2)
@@ -421,7 +437,100 @@ void MoodController::ChangeState(MoodState s) {
     }
 }
 
-// ---- 手势脚本 (幅度=度, 经 STEPS_FOR_DEG 换算为步数) ----
+// ---- 手势实现 ----
+// 电位器闭环 (ITOY_HOME_POT): 位置手势 — 每个情绪 = 从中位走向行程百分比目标。
+//   "点头" = 去往低头端 (读数大 2570), "抬头/仰" = 读数小端 (1300), 左/右摆 = 摇头轴两端。
+//   auto_center=true: 动作结束自动回中位 (1900/1900) 断电; false: 保持末段姿态断电。
+//   回中 (Home) 独立存在, 任意位置都能回到 1900/1900。
+// 开环 (默认): 步数脚本 (幅度=度, 经 STEPS_FOR_DEG 换算), 相对"记录零位"累计。
+#if CONFIG_ITOY_HOME_POT
+
+// 目标读数 = 中位 + pct% × 该方向满行程 (点头>0=低头 / 摇头>0=右; 上下/左右行程不对称各自算)
+static int16_t NodPos(int pct) {
+    int span = (pct >= 0) ? (POT_NOD_DOWN_RAW - POT_NOD_CENTER_RAW)
+                          : (POT_NOD_CENTER_RAW - POT_NOD_UP_RAW);
+    return (int16_t)(POT_NOD_CENTER_RAW + pct * span / 100);
+}
+static int16_t ShakePos(int pct) {
+    int span = (pct >= 0) ? (POT_SHAKE_RIGHT_RAW - POT_SHAKE_CENTER_RAW)
+                          : (POT_SHAKE_CENTER_RAW - POT_SHAKE_LEFT_RAW);
+    return (int16_t)(POT_SHAKE_CENTER_RAW + pct * span / 100);
+}
+
+void MoodController::GesturePowerOn() {
+    // 轻微仰头 -> 回中
+    ESP_LOGI(TAG, "gesture POWER_ON: nod up %d%% -> center", P_NOD_OPEN);
+    PosStep g[] = { {NodPos(P_NOD_OPEN), -1, SP_SLOW} };
+    motor_->PlayPosGesture(g, 1, /*auto_center=*/true);
+}
+
+void MoodController::GestureHappy() {
+    // 轻点头 + 左右摆一次 -> 回中
+    ESP_LOGI(TAG, "gesture HAPPY: nod %d%%, wiggle ±%d%%", P_NOD_HAPPY, P_WIG_HAPPY);
+    PosStep g[] = {
+        {NodPos(P_NOD_HAPPY),  -1,                     SP_NORMAL},
+        {-1,                   ShakePos(-P_WIG_HAPPY), SP_NORMAL},
+        {-1,                   ShakePos(P_WIG_HAPPY),  SP_NORMAL},
+    };
+    motor_->PlayPosGesture(g, 3, /*auto_center=*/true);
+}
+
+void MoodController::GestureComfort() {
+    // 缓慢前倾 (倾听姿态), 保持
+    ESP_LOGI(TAG, "gesture COMFORT: tilt down %d%% (hold)", P_TILT_COMFORT);
+    PosStep g[] = { {NodPos(P_TILT_COMFORT), -1, SP_SLOW} };
+    motor_->PlayPosGesture(g, 1, /*auto_center=*/false);
+}
+
+void MoodController::GestureDeepBreath() {
+    // 极缓慢前倾 -> 回中, 2 次循环 (与呼吸灯近似同步); 末段即中位, 到位断电
+    ESP_LOGI(TAG, "gesture DEEP_BREATH: ±%d%% x2", P_BREATH);
+    PosStep g[] = {
+        {NodPos(P_BREATH), -1, SP_SLOW},
+        {NodPos(0),        -1, SP_SLOW},
+        {NodPos(P_BREATH), -1, SP_SLOW},
+        {NodPos(0),        -1, SP_SLOW},
+    };
+    motor_->PlayPosGesture(g, 4, /*auto_center=*/false);
+}
+
+void MoodController::GestureSleepy() {
+    ESP_LOGI(TAG, "gesture SLEEPY: tilt down %d%% (hold)", P_TILT_SLEEP);
+    PosStep g[] = { {NodPos(P_TILT_SLEEP), -1, SP_SLOW} };
+    motor_->PlayPosGesture(g, 1, /*auto_center=*/false);
+}
+
+void MoodController::GestureDisturbed() {
+    // 快速低头 + 左右甩
+    ESP_LOGI(TAG, "gesture DISTURBED: nod %d%%, wiggle ±%d%%", P_DISTURB_NOD, P_DISTURB_WIG);
+    PosStep g[] = {
+        {NodPos(P_DISTURB_NOD), -1,                      SP_FAST},
+        {-1,                    ShakePos(-P_DISTURB_WIG), SP_FAST},
+        {-1,                    ShakePos(P_DISTURB_WIG),  SP_FAST},
+    };
+    motor_->PlayPosGesture(g, 3, /*auto_center=*/true);
+}
+
+void MoodController::GestureLowBattery() {
+    ESP_LOGI(TAG, "gesture LOW_BATT: tilt down %d%% (hold)", P_TILT_LOWBAT);
+    PosStep g[] = { {NodPos(P_TILT_LOWBAT), -1, SP_SLOW} };
+    motor_->PlayPosGesture(g, 1, /*auto_center=*/false);
+}
+
+void MoodController::GestureHeadTurn() {
+    // 扭脖: 低头+摇头对角往返, 起止于中位 (两轴同步朝各自目标走 -> 弧线轨迹)
+    ESP_LOGI(TAG, "gesture HEAD_TURN: shake ±%d%%, nod ±%d%%", P_TURN_SHAKE, P_TURN_NOD);
+    PosStep g[] = {
+        {NodPos(P_TURN_NOD),  ShakePos(-P_TURN_SHAKE), SP_TURN},   // 低头+左
+        {NodPos(-P_TURN_NOD), ShakePos(P_TURN_SHAKE),  SP_TURN},   // 仰头+右
+        {NodPos(P_TURN_NOD),  ShakePos(-P_TURN_SHAKE), SP_TURN},   // 低头+左
+        {NodPos(0),           ShakePos(0),             SP_TURN},   // 回中
+    };
+    motor_->PlayPosGesture(g, 4, /*auto_center=*/false);   // 末段即中位
+}
+
+#else  // ---- 开环: 原步数手势脚本 ----
+
 void MoodController::GesturePowerOn() {
     // 从低头位 -> 中立, 轻微仰头再回
     ESP_LOGI(TAG, "gesture POWER_ON: nod +%d/-2 deg", G_DEG_NOD_OPEN);
@@ -509,3 +618,5 @@ void MoodController::GestureHeadTurn() {
     };
     motor_->PlayDualGesture(g, 4, /*auto_home=*/true);   // 结束后自动回零位并断电
 }
+
+#endif  // CONFIG_ITOY_HOME_POT

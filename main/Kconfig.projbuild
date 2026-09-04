@@ -75,6 +75,9 @@ choice ITOY_HOME_MODE
             采样电位器读数, 朝中位目标步进, 进死区即停 (两轴独立)。
             方向由 config.h 的 MOTOR_xxx_POT_CW_INC 决定 — 若上电后
             电机朝反方向走, 把对应项取反。
+            同时情绪手势切换为位置模式 (PlayPosGesture): 目标 = 中位 ±
+            满行程百分比, 如"点头"=从回中走向低头端 (POT_NOD_DOWN_RAW)。
+            开环模式则保持原步数脚本不变。
 endchoice
 
 # ---- 运行模式 (三选一, 互斥) ----

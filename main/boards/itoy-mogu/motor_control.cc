@@ -215,18 +215,20 @@ void MotorControl::Initialize() {
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, (adc_channel_t)POT_SHAKE_CHAN, &chan_cfg));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, (adc_channel_t)BATTERY_ADC_CHAN, &chan_cfg));
 
-    const uint32_t lo = (uint32_t)((uint32_t)POT_MAX_VALUE * POT_RANGE_MIN_PCT / 100);
-    const uint32_t hi = (uint32_t)((uint32_t)POT_MAX_VALUE * POT_RANGE_MAX_PCT / 100);
-
+    // 电子限位 = 实测满行程内缩 POT_LIMIT_MARGIN (读数噪声余量), 每轴独立
     // 点头电机: U17 via U9 = GPIO41/40/48/47 + 电位器 U12 (ADC1_CH5)
     motors_[MOTOR_NOD] = new StepperMotor(
         MOTOR_NOD_A_GPIO, MOTOR_NOD_B_GPIO, MOTOR_NOD_C_GPIO, MOTOR_NOD_D_GPIO,
-        adc_handle_, (adc_channel_t)POT_NOD_CHAN, lo, hi, MOTOR_NOD_POT_CW_INC);
+        adc_handle_, (adc_channel_t)POT_NOD_CHAN,
+        POT_NOD_UP_RAW + POT_LIMIT_MARGIN, POT_NOD_DOWN_RAW - POT_LIMIT_MARGIN,
+        MOTOR_NOD_POT_CW_INC);
 
     // 摇头电机: U16 via U8 = GPIO21/18/17/16 + 电位器 U5 (ADC1_CH4)
     motors_[MOTOR_SHAKE] = new StepperMotor(
         MOTOR_SHAKE_A_GPIO, MOTOR_SHAKE_B_GPIO, MOTOR_SHAKE_C_GPIO, MOTOR_SHAKE_D_GPIO,
-        adc_handle_, (adc_channel_t)POT_SHAKE_CHAN, lo, hi, MOTOR_SHAKE_POT_CW_INC);
+        adc_handle_, (adc_channel_t)POT_SHAKE_CHAN,
+        POT_SHAKE_LEFT_RAW + POT_LIMIT_MARGIN, POT_SHAKE_RIGHT_RAW - POT_LIMIT_MARGIN,
+        MOTOR_SHAKE_POT_CW_INC);
 
     motors_[MOTOR_NOD]->Initialize();
     motors_[MOTOR_SHAKE]->Initialize();
@@ -280,6 +282,10 @@ void MotorControl::MotorLoop() {
             delay_ms = DualGestureTick();             // 双轴手势优先 (转头等联动)
         } else if (gesture_active_) {
             delay_ms = GestureTick();                 // 单轴手势
+#if CONFIG_ITOY_HOME_POT
+        } else if (pos_active_) {
+            delay_ms = PosTick();                     // 位置手势 (电位器闭环)
+#endif
         } else if (homing_) {
             delay_ms = HomeTick();                    // 回中 (按 pos_ 反向步进至 0)
         } else {
@@ -341,6 +347,9 @@ void MotorControl::PlayGesture(const GestureStep* steps, int n) {
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
     dual_active_ = false;   // 取消双轴手势, 单轴优先
+#if CONFIG_ITOY_HOME_POT
+    pos_active_ = false;    // 取消位置手势
+#endif
     int len = n > MAX_GESTURE_STEPS ? MAX_GESTURE_STEPS : n;
     for (int i = 0; i < len; i++) gesture_[i] = steps[i];
     gesture_len_ = len;
@@ -359,6 +368,9 @@ void MotorControl::PlayDualGesture(const DualGestureStep* steps, int n, bool aut
     for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
     gesture_active_ = false;                                    // 双轴优先, 取消单轴手势
     homing_ = false;                                            // 取消回中
+#if CONFIG_ITOY_HOME_POT
+    pos_active_ = false;    // 取消位置手势
+#endif
     dual_auto_home_ = auto_home;
     int len = n > MAX_DUAL_GESTURE_STEPS ? MAX_DUAL_GESTURE_STEPS : n;
     for (int i = 0; i < len; i++) dual_[i] = steps[i];
@@ -445,6 +457,9 @@ void MotorControl::StopGesture() {
     gesture_active_ = false;
     dual_active_ = false;
     homing_ = false;
+#if CONFIG_ITOY_HOME_POT
+    pos_active_ = false;
+#endif
     gesture_done_ = true;
     for (int i = 0; i < MOTOR_COUNT; i++) {
         active_dir_[i] = 0;
@@ -453,12 +468,99 @@ void MotorControl::StopGesture() {
     xSemaphoreGive(step_mutex_);
 }
 
+#if CONFIG_ITOY_HOME_POT
+// ---- 位置手势 (电位器闭环) ----
+
+namespace {
+// 目标夹进 [电子限位±死区]: 满行程端点在限位外, 不夹会永远到不了
+int ClampPotTarget(const StepperMotor* m, int target) {
+    int lo = (int)m->pot_min() + POT_CENTER_TOL;
+    int hi = (int)m->pot_max() - POT_CENTER_TOL;
+    return target < lo ? lo : (target > hi ? hi : target);
+}
+}  // namespace
+
+void MotorControl::PlayPosGesture(const PosStep* steps, int n, bool auto_center) {
+    if (!initialized_ || !steps || n <= 0) return;
+    xSemaphoreTake(step_mutex_, portMAX_DELAY);
+    for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;   // 取消手动驱动
+    gesture_active_ = false;    // 位置手势优先, 取消步数手势
+    dual_active_ = false;
+    homing_ = false;
+    int len = n > MAX_POS_STEPS ? MAX_POS_STEPS : n;
+    for (int i = 0; i < len; i++) pos_seq_[i] = steps[i];
+    pos_len_ = len;
+    pos_idx_ = 0;
+    pos_seg_steps_ = 0;
+    pos_nod_done_ = pos_shake_done_ = false;
+    pos_auto_center_ = auto_center;
+    pos_active_ = true;
+    gesture_done_ = false;
+    xSemaphoreGive(step_mutex_);
+    ESP_LOGI(TAG, "pos gesture play: %d segs auto_center=%d (seg0 nod=%d shake=%d %dms)",
+             len, auto_center ? 1 : 0,
+             (int)pos_seq_[0].nod_target, (int)pos_seq_[0].shake_target, (int)pos_seq_[0].delay_ms);
+}
+
+// 推进位置手势一微步: 本段内两轴各自朝目标读数步进, 各自进死区即停;
+// 撞电子限位 (StepOnceLimited 拒绝) 也视为该轴到位, 防卡死。两轴到齐进下一段。
+// 末段结束: auto_center -> 转回中 (homing_), 否则断电保持姿态。
+int MotorControl::PosTick() {
+    const PosStep& seg = pos_seq_[pos_idx_];
+
+    if (seg.nod_target < 0) pos_nod_done_ = true;
+    else if (!pos_nod_done_) {
+        StepperMotor* m = motors_[MOTOR_NOD];
+        int target = ClampPotTarget(m, seg.nod_target);
+        int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
+        if (std::abs(diff) <= POT_CENTER_TOL) pos_nod_done_ = true;
+        else if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_nod_done_ = true;
+    }
+    if (seg.shake_target < 0) pos_shake_done_ = true;
+    else if (!pos_shake_done_) {
+        StepperMotor* m = motors_[MOTOR_SHAKE];
+        int target = ClampPotTarget(m, seg.shake_target);
+        int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
+        if (std::abs(diff) <= POT_CENTER_TOL) pos_shake_done_ = true;
+        else if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_shake_done_ = true;
+    }
+
+    if (++pos_seg_steps_ > MOTOR_STEPS_PER_REV / 8)   // 段超限保护 (卡住跳段)
+        pos_nod_done_ = pos_shake_done_ = true;
+
+    if (pos_nod_done_ && pos_shake_done_) {
+        pos_idx_++;
+        pos_seg_steps_ = 0;
+        pos_nod_done_ = pos_shake_done_ = false;
+        if (pos_idx_ >= pos_len_) {
+            pos_active_ = false;
+            if (pos_auto_center_) {
+                home_steps_ = 0;
+                homing_ = true;   // 转回中 (到位断电)
+                ESP_LOGI(TAG, "pos gesture done -> centering");
+                return MOTOR_STEP_DELAY_MS * 2;
+            }
+            StopAll();           // 末段即终点: 保持姿态断电
+            gesture_done_ = true;
+            ESP_LOGI(TAG, "pos gesture done (hold, nod=%lu shake=%lu)",
+                     (unsigned long)motors_[MOTOR_NOD]->ReadPotSmooth(),
+                     (unsigned long)motors_[MOTOR_SHAKE]->ReadPotSmooth());
+            return 50;
+        }
+    }
+    return seg.delay_ms ? (int)seg.delay_ms : MOTOR_STEP_DELAY_MS;
+}
+#endif  // CONFIG_ITOY_HOME_POT
+
 void MotorControl::Home() {
     // 回中: 非阻塞。置 homing_, 电机任务用 HomeTick 走回中位, 到位断电。
     if (!initialized_) return;
     xSemaphoreTake(step_mutex_, portMAX_DELAY);
     gesture_active_ = false;
     dual_active_ = false;
+#if CONFIG_ITOY_HOME_POT
+    pos_active_ = false;    // 回中取消位置手势
+#endif
     for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;
     home_steps_ = 0;
     homing_ = true;
@@ -500,7 +602,8 @@ int MotorControl::HomeTick() {
         bool cw = (diff > 0) == m->pot_cw_inc();          // 需增大读数 -> 按 cw_inc 方向走
         m->StepOnceLimited(cw);
     }
-    if (++home_steps_ > MOTOR_STEPS_PER_REV) done = true; // 超限保护 (电位器没接/方向不对防狂转)
+    // 超限保护: 中位到机械限位仅 ~300 步, 1/4 圈绰绰有余; 方向反/没接时少磨机械限位
+    if (++home_steps_ > MOTOR_STEPS_PER_REV / 4) done = true;
     if (done) {
         homing_ = false;
         StopAll();      // 到位断电, 防发热
