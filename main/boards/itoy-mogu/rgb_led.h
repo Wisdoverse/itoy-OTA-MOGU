@@ -46,8 +46,10 @@ public:
     uint8_t GetBrightness() const { return cap_pct_; }
 
     // 呼吸相位 (供身体起伏等外部联动): BREATH 态返回三角波相位 0~1
-    // (谷=0/1.0 最暗, 峰=0.5 最亮, 与灯严格同拍); 非 BREATH 态返回 -1。
-    // 注: tick_ 为 uint32 单字读, 跨任务调用最多差一个动画 tick (10ms), 可接受
+    // (谷=0/1.0 最暗, 峰=0.5 最亮, 时间基准与 ComputeBrightPct 完全一致, 不错拍);
+    // 非 BREATH 态返回 -1。
+    // 注: 各字段非原子快照 — 跨任务读最多差一个动画 tick (10ms);
+    // Breath() 切换瞬间的一次采样可能混读新旧参数, 表现为单次采样偏差, 可接受
     float GetBreathPhase() const;
 
     int count() const { return count_; }
