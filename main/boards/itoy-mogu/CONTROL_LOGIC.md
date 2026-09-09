@@ -135,3 +135,35 @@ rgb.Refresh();
 - [ ] 触摸阈值：当前按基线 ×0.8，可按铜片尺寸/灵敏度调 `TouchPad::Calibrate()` 的 ratio。
 - [ ] RGB 灯带：按实物在 menuconfig 设 `CONFIG_ITOY_RGB_LED_COUNT`；注意 U13 由 3V3 供电，灯珠多时需确认供电与亮度（用 `SetBrightness` 限流）。
 - [ ] （可选）待机随机动作、IMQ 加速度检测拍打互动等，后续按需加。
+
+## 行为层 BehaviorEngine (2026-09-09, 电位器闭环模式专属)
+
+`behavior_engine.h/.cc` — 情绪表现的统一调度层, 无独立任务 (mood 的 100ms 循环驱动 `Tick()`)。
+
+```
+Touch ──→ MoodController ──→ BehaviorEngine ──→ MotorControl::PlayPosGesture
+          (状态机/触摸分类/RGB)  (优先级调度/脚本库)     (步进执行)
+                                    ↑ 呼吸相位 RgbLed::GetBreathPhase()
+```
+
+优先级: 3=情绪入场(一次性) > 2=即时反应(转向触摸侧+保持到松手) > 1=idle/呼吸起伏。
+高打低: 直接重播(位置闭环从任意当前位置出发); 低请求在高位播放期间丢弃;
+情绪播放中不被触摸反应打断; 同优先级情绪最新胜 (PlayEmotion 先清 cur_pri_,
+新情绪永远接管 — 与旧 PlayPosGesture 直接重播行为一致)。
+
+- **情绪变体**: HAPPY/DISTURBED ×3、COMFORT/SLEEPY ×2 (esp_random 抽选, 连点重抽);
+  摆动偏向最近触摸侧 (脚本首摆向右, side=左整体镜像); 全部 S 缓动 (PosStep.ease=1)。
+- **即时反应**: 按下边沿 ≤100ms 转头看触摸侧 ({nod-15%, shake±60%}); 第二只手 ->
+  看正前 (同优先级重播); 同侧重复幂等; 全松开无情绪接管则缓动回中。
+- **idle 库** (仅 CALM, menuconfig `ITOY_PERSONALITY` 安静/适中/活泼 档):
+  转头看一边/轻点头/换姿势/抬头张望/摇头晃脑(仅活泼), 权重 {3,2,1,1,2}, 幅度按档缩放。
+- **呼吸联动** (仅保持态 COMFORT/SLEEPY/LOW_BATTERY): 灯 Breath 相位过谷(吸气)->仰、
+  过峰(呼气)->低, ±10% 起伏, 相位直取 `GetBreathPhase()` 永不错拍; SLEEPY 的打盹微动即此。
+  离开保持态即停 (新情绪清联动 / EnterCalm 亦清)。
+  前提: COMFORT 灯已改慢呼吸 (5000ms 25%<->45%, 入场先 FadeTo 过渡)。
+
+调试: 网页 `/api/mood?s=touchL|touchR|idle` 手动触发 (调试模式无 mood Loop,
+反应按钮每次点击先模拟完整"按下-松开"并手动推一拍 Tick 回落优先级);
+串口统一日志 `BEHAVIOR play pri=N kind=... dir=... ease=N`。
+缓动回退: 全表 ease 改 0 = 恒速旧行为。
+开环模式 (ITOY_HOME_OPEN_LOOP): 行为层不编译, 走原 GestureXxx 步数脚本。
