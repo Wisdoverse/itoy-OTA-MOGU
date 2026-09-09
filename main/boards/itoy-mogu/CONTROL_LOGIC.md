@@ -155,6 +155,7 @@ Touch ──→ MoodController ──→ BehaviorEngine ──→ MotorControl::
   摆动偏向最近触摸侧 (脚本首摆向右, side=左整体镜像); 全部 S 缓动 (PosStep.ease=1)。
 - **即时反应**: 按下边沿 ≤100ms 转头看触摸侧 ({nod-15%, shake±60%}); 第二只手 ->
   看正前 (同优先级重播); 同侧重复幂等; 全松开无情绪接管则缓动回中。
+  静止态 (OFF/开机入场/夜灯) 不触发 — 夜灯"静止是特性"; 松手边沿仍转发以免粘滞。
 - **idle 库** (仅 CALM, menuconfig `ITOY_PERSONALITY` 安静/适中/活泼 档):
   转头看一边/轻点头/换姿势/抬头张望/摇头晃脑(仅活泼), 权重 {3,2,1,1,2}, 幅度按档缩放。
 - **呼吸联动** (仅保持态 COMFORT/SLEEPY/LOW_BATTERY): 灯 Breath 相位过谷(吸气)->仰、
@@ -165,5 +166,6 @@ Touch ──→ MoodController ──→ BehaviorEngine ──→ MotorControl::
 调试: 网页 `/api/mood?s=touchL|touchR|idle` 手动触发 (调试模式无 mood Loop,
 反应按钮每次点击先模拟完整"按下-松开"并手动推一拍 Tick 回落优先级);
 串口统一日志 `BEHAVIOR play pri=N kind=... dir=... ease=N`。
-缓动回退: 全表 ease 改 0 = 恒速旧行为。
+缓动回退: 全表 ease 改 0 = 恒速旧行为 (除 8 张脚本表外, 反应/呼吸段/idle 随拍
+共 5 处内联 MakeStep 亦硬编 ease=1, 回退时一并改)。
 开环模式 (ITOY_HOME_OPEN_LOOP): 行为层不编译, 走原 GestureXxx 步数脚本。
