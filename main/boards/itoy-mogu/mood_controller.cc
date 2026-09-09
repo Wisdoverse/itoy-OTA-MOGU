@@ -270,13 +270,20 @@ void MoodController::PollTouch(uint32_t now_ms) {
     bool both = l && r;
     bool any = l || r;
 
+#if CONFIG_ITOY_HOME_POT
+    // 静止态不喂按下边沿: 夜灯"静止是特性", OFF(3s 后断电)/开机入场被摸会
+    // 突发转头。松手边沿照常转发 — 它只会结束动作、不发起动作, touching_
+    // 也不会粘滞到下一个状态
+    bool react_ok = engine_ && state_ != MOOD_OFF && state_ != MOOD_POWER_ON &&
+                    state_ != MOOD_NIGHT_LIGHT;
+#endif
     // 按下边沿
     if (l && !prev_left_) {
         left_ms_ = now_ms; left_hold_fired_ = false; last_touch_ms_ = now_ms;
         ESP_LOGI(TAG, "touch LEFT down");
         last_side_ = -1;
 #if CONFIG_ITOY_HOME_POT
-        if (engine_) engine_->OnTouchDown(SIDE_LEFT);   // 即时反应: 转向左侧保持
+        if (react_ok) engine_->OnTouchDown(SIDE_LEFT);   // 即时反应: 转向左侧保持
 #endif
     }
     if (r && !prev_right_) {
@@ -284,7 +291,7 @@ void MoodController::PollTouch(uint32_t now_ms) {
         ESP_LOGI(TAG, "touch RIGHT down");
         last_side_ = 1;
 #if CONFIG_ITOY_HOME_POT
-        if (engine_) engine_->OnTouchDown(SIDE_RIGHT);
+        if (react_ok) engine_->OnTouchDown(SIDE_RIGHT);   // 即时反应: 转向右侧保持
 #endif
     }
     if (both && both_ms_ == 0) both_ms_ = now_ms;
