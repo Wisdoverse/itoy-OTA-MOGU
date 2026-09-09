@@ -9,6 +9,8 @@
 #include "rgb_led.h"
 #include "power_control.h"
 
+class BehaviorEngine;   // 行为层 (前置声明; 电位器闭环模式由板级注入, 开环为 nullptr)
+
 // 情绪状态 (按《情绪蘑菇》交互设计 md)
 enum MoodState : uint8_t {
     MOOD_OFF = 0,
@@ -48,7 +50,10 @@ public:
     MoodController();
     ~MoodController();
 
-    void Initialize(TouchPad* touch, MotorControl* motor, RgbLed* rgb, PowerControl* power);
+    // engine: 行为层指针 (电位器闭环模式注入; 默认 nullptr = 开环旧手势路径)
+    void Initialize(TouchPad* touch, MotorControl* motor, RgbLed* rgb, PowerControl* power,
+                    BehaviorEngine* engine = nullptr);
+    BehaviorEngine* engine() { return engine_; }   // 调试网页触发即时反应/idle 用
     void Start();                 // 启动状态机任务, 自动进入 POWER_ON
     void RequestPowerOff();       // 请求关机 (渐灭后断电)
     void SetNightLight(bool on);  // 夜灯开关 (app 调用)
@@ -68,6 +73,7 @@ private:
     void PollTouch(uint32_t now_ms);
     void PollBattery(uint32_t now_ms);
     void OnShortTap(uint32_t now_ms);
+    void PlayMoodGesture();   // 当前状态入场手势/行为 (闭环: engine; 开环: GestureXxx)
 
     bool LeftPressed();
     bool RightPressed();
@@ -86,6 +92,10 @@ private:
     MotorControl* motor_ = nullptr;
     RgbLed* rgb_ = nullptr;
     PowerControl* power_ = nullptr;
+    BehaviorEngine* engine_ = nullptr;
+
+    int8_t last_side_ = 0;                     // 最近按下边沿的侧别 (-1 左/+1 右; 情绪摆动偏向)
+    uint32_t comfort_breath_pending_ms_ = 0;    // COMFORT 渐变完成后切慢呼吸的时刻 (0=无)
     TaskHandle_t task_ = nullptr;
 
     MoodState state_ = MOOD_OFF;
