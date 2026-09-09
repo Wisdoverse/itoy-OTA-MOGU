@@ -327,8 +327,8 @@ void BehaviorEngine::LeaveCalm() {
 }
 
 // 调试按钮 (网页): 无论当前状态立即播一条 idle — PlayPosGesture 内部自会
-// 取消在播动作。注: 调试模式无 Tick, look/gaze 变体的"停顿后回中"不会触发
-// (now_ms=0 只是占位), 动作停在姿态上属预期。
+// 取消在播动作。注: 调试模式无 Loop Tick, look/gaze 变体的"停顿后回中"只在
+// 下次手动推 Tick (网页反应按钮) 时补发且无停顿, 动作停在姿态上属预期。
 void BehaviorEngine::ForceIdle() {
     cur_pri_ = 0;
     PlayIdleAction(0);

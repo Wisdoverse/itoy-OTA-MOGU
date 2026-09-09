@@ -254,6 +254,9 @@ static esp_err_t handle_mood(httpd_req_t* req) {
 #if CONFIG_ITOY_HOME_POT
     } else if (strcmp(val, "touchL") == 0 || strcmp(val, "touchR") == 0) {
         if (s_mood && s_mood->engine()) {
+            // 调试模式无松手边沿 -> touching_ 会粘滞: 每次点击先模拟一次完整
+            // "松开" (顺带缓动回中), 再按下, 连点/换侧都如实重演
+            s_mood->engine()->OnAllTouchUp();
             s_mood->engine()->Tick((uint32_t)(esp_timer_get_time() / 1000));
             s_mood->engine()->OnTouchDown(val[5] == 'L' ? SIDE_LEFT : SIDE_RIGHT);
         }
