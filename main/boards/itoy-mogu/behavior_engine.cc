@@ -209,6 +209,8 @@ void BehaviorEngine::PlayEmotion(EmoKind kind, TouchSide side) {
         default:
             break;
     }
+    cur_pri_ = 0;   // 情绪入场恒接管 (最新胜): PlayPri 只放行"更高", 而所有情绪同为
+                    // pri 3, 不清零则播放中的情绪会吞掉新情绪 (旧行为即直接重播)
     if (kind == EMO_SLEEPY && side == SIDE_NONE)
         side = (esp_random() & 1) ? SIDE_LEFT : SIDE_RIGHT;   // 困倦变体② 微偏随机侧
     switch (kind) {
@@ -310,6 +312,7 @@ void BehaviorEngine::OnAllTouchUp() {
 
 void BehaviorEngine::EnterCalm(uint32_t now_ms) {
     idle_on_ = true;
+    breath_follow_ = false;   // 保持态出场 -> 呼吸联动随姿态一起结束 (CALM 只要 idle)
     // 进场先等半程随机间隔再开始 (开机不乱动)
     uint32_t half = (IDLE_MIN_MS + esp_random() % (IDLE_MAX_MS - IDLE_MIN_MS)) / 2;
     idle_next_ms_ = now_ms + half;
