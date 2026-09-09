@@ -169,7 +169,7 @@ Touch ──→ MoodController ──→ BehaviorEngine ──→ MotorControl::
   Tick 回落优先级;
 - 生产调试 (ITOY_RUN_PROD_DEBUG, 完整状态机+网页, 无云端): 命令投 mood 邮箱
   由其任务执行 (PostDebugDemo/Touch/Idle, 不跨任务直碰状态机/engine);
-  touchL/touchR 模拟一次 ~1.5s 短摸走完整事件链 (转头保持→自动松开→回中→
+  touchL/touchR 模拟一次 ~0.8s 短摸走完整事件链 (转头保持→自动松开→回中→
   短按分类, 开环下也可用); /api/state 的 `st` 字段实时报当前情绪状态。
 串口统一日志 `BEHAVIOR play pri=N kind=... dir=... ease=N`。
 缓动回退: 全表 ease 改 0 = 恒速旧行为 (除 8 张脚本表外, 反应/呼吸段/idle 随拍

@@ -241,7 +241,7 @@ static esp_err_t handle_motor(httpd_req_t* req) {
 //     每次点击先模拟完整"按下-松开"并手动推一拍 Tick 回落优先级 (开环下
 //     engine 为空文件, 该两分支被编译掉, 落到数值分支 atoi=0 -> 演示 MOOD_OFF)。
 //   生产调试 (mood 任务在跑): 全部投邮箱由 mood 任务执行 (不跨任务直碰
-//     状态机/engine); touchL/touchR 模拟一次 ~1.5s 短摸走完整事件链
+//     状态机/engine); touchL/touchR 模拟一次 ~0.8s 短摸走完整事件链
 //     (转头保持→自动松开→回中→短按分类), 开环下也可用 (走开环手势路径)。
 static esp_err_t handle_mood(httpd_req_t* req) {
     char query[32], val[16];

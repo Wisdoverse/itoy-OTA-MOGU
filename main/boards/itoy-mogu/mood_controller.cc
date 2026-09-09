@@ -62,8 +62,9 @@
 
 // 调试: 心跳打印间隔 (ms), 0 = 关闭
 #define DBG_HEARTBEAT_MS   5000
-// 调试网页模拟触摸时长 (<HOLD_ONE_MS: 短按 -> 松开走 HAPPY 分类链路)
-#define DBG_SIM_TOUCH_MS   1500
+// 调试网页模拟触摸时长 (须 < SHORT_TAP_MAX_MS: 松开按短按分类 -> HAPPY 链路;
+// 1s~3s 之间是既非短按也非长按的死区, 别取)
+#define DBG_SIM_TOUCH_MS   800
 
 static const char* StateName(MoodState s) {
     switch (s) {
