@@ -119,7 +119,7 @@ void MoodController::Start() {
     last_touch_ms_ = 0;
     rgb_->Off();
     HandleEvent(EVT_POWER_ON);   // 进入开机过渡
-    xTaskCreate(TaskFunc, "mood", 3072, this, 5, &task_);
+    xTaskCreate(TaskFunc, "mood", 4096, this, 5, &task_);
 }
 
 void MoodController::RequestPowerOff() {
