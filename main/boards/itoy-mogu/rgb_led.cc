@@ -176,3 +176,10 @@ void RgbLed::AnimLoop() {
 void RgbLed::AnimTaskFunc(void* arg) {
     static_cast<RgbLed*>(arg)->AnimLoop();
 }
+
+float RgbLed::GetBreathPhase() const {
+    if (effect_ != RGB_BREATH) return -1.0f;
+    uint32_t elapsed = (tick_ - breath_start_tick_) * 10;   // 与 ComputeBrightPct 同基准
+    uint32_t pos = elapsed % period_ms_;
+    return (float)pos / (float)period_ms_;
+}
