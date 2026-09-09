@@ -95,7 +95,6 @@ private:
     RgbLed* rgb_ = nullptr;
 
     uint8_t cur_pri_ = 0;        // 当前播放优先级 (0=空闲)
-    EmoKind kind_ = EMO_NONE;
 
     bool touching_ = false;
     TouchSide last_down_side_ = SIDE_NONE;

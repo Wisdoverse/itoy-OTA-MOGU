@@ -192,7 +192,6 @@ void BehaviorEngine::PlayPri(uint8_t pri, const char* label, TouchSide side,
 }
 
 void BehaviorEngine::PlayEmotion(EmoKind kind, TouchSide side) {
-    kind_ = kind;
     breath_follow_ = false;   // 新情绪清旧联动; 保持态变体在 PlayVariant 里再设
     follow_up_ = false;
     switch (kind) {
@@ -292,6 +291,8 @@ void BehaviorEngine::OnTouchDown(TouchSide side) {
     g[0] = second
                ? MakeStep({FRONT_NOD_PCT, 0, BEH_SP_FAST, 1}, 1, 100)
                : MakeStep({REACT_NOD_PCT, (int8_t)(REACT_SHAKE_PCT * side), BEH_SP_FAST, 1}, 1, 100);
+    if (second) cur_pri_ = 0;   // 看正前 = 同优先级重播: PlayPri 只放行"更高",
+                                 // 而 REACTIVE 不随 Tick 回落, 不清零会被自己丢弃
     PlayPri(PRI_REACTIVE, second ? "reactive/front" : "reactive/turn", side, g, 1,
             /*auto_center=*/false);
 }
@@ -322,11 +323,11 @@ void BehaviorEngine::LeaveCalm() {
     ESP_LOGI(TAG, "calm idle off");
 }
 
+// 调试按钮 (网页): 无论当前状态立即播一条 idle — PlayPosGesture 内部自会
+// 取消在播动作。注: 调试模式无 Tick, look/gaze 变体的"停顿后回中"不会触发
+// (now_ms=0 只是占位), 动作停在姿态上属预期。
 void BehaviorEngine::ForceIdle() {
-    if (cur_pri_ != 0) {
-        ESP_LOGI(TAG, "force idle skipped (busy pri=%d)", cur_pri_);
-        return;
-    }
+    cur_pri_ = 0;
     PlayIdleAction(0);
 }
 
@@ -335,11 +336,12 @@ void BehaviorEngine::ScheduleNextIdle(uint32_t now_ms) {
 }
 
 int BehaviorEngine::PickIdleAction() {
+    constexpr int kIdleCount = (int)(sizeof(kIdleWeights) / sizeof(kIdleWeights[0]));
     int total = 0;
-    for (int i = 0; i < (int)(sizeof(kIdleWeights) / sizeof(kIdleWeights[0])); i++)
+    for (int i = 0; i < kIdleCount; i++)
         if (i != 4 || IDLE_LIVELY) total += kIdleWeights[i];
     uint32_t r = esp_random() % (uint32_t)total;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < kIdleCount; i++) {
         if (i == 4 && !IDLE_LIVELY) continue;
         if ((int)r < kIdleWeights[i]) return i;
         r -= kIdleWeights[i];
