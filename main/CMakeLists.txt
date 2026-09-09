@@ -13,6 +13,7 @@ set(INCLUDE_DIRS "." "boards/itoy-mogu")
 # Add board common files
 # 注: ESP-IDF 不允许 file(GLOB ... CONFIGURE_DEPENDS), 所以新增 .cc 后需触发一次
 # reconfigure (改本文件 / idf.py reconfigure) 才会被 glob 收录。
+# (2026-09-08 新增 behavior_engine.cc — 本注释变更即触发 reglob)
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
 list(APPEND SOURCES ${BOARD_COMMON_SOURCES})
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
