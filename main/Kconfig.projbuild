@@ -97,22 +97,31 @@ choice ITOY_PERSONALITY
         bool "活泼 (10~30s 一次, 幅度 x1.3 + 摇头晃脑)"
 endchoice
 
-# ---- 运行模式 (三选一, 互斥) ----
+# ---- 运行模式 (四选一, 互斥) ----
 choice ITOY_RUN_MODE
-    prompt "运行模式 (三选一)"
+    prompt "运行模式 (四选一)"
     default ITOY_RUN_NORMAL
     help
-        选择设备启动后的运行模式。三选一, 互斥。
+        选择设备启动后的运行模式。四选一, 互斥。
 
     config ITOY_RUN_NORMAL
         bool "正常模式 (情绪蘑菇 + WiFi/BLE 配网)"
         help
             完整功能: 触摸 → 情绪状态机 → 电机手势 + RGB + OTA。
 
+    config ITOY_RUN_PROD_DEBUG
+        bool "生产调试模式 (完整状态机 + 调试网页, 无云端)"
+        help
+            与正常模式同款完整行为 (真实触摸→情绪状态机→电机手势+RGB,
+            含 idle/呼吸联动/自动关机), 但以 WiFi 热点+调试网页代替配网与
+            云端 — 贴近生产环境排查问题。网页命令经 mood 任务执行
+            (摸左/摸右 = 模拟一次 ~1.5s 短摸, 走完整事件链)。
+
     config ITOY_ENABLE_DEBUG_MODE
         bool "调试模式 (WiFi 热点 + 网页调试)"
         help
-            开机起 WiFi 热点 Itoy-Debug-XXXX, 网页控电机/看触摸/电位器/电池/日志。
+            功能验证: 开机起 WiFi 热点 Itoy-Debug-XXXX, 网页控电机/看触摸/
+            电位器/电池/日志, 情绪按钮直接重放手势。不跑自动状态机/触摸轮询,
             跳过配网与情绪。
 
     config ITOY_ENABLE_MOTOR_SELFTEST
@@ -124,7 +133,7 @@ endchoice
 config ITOY_DEBUG_AP_PASSWORD
     string "调试热点密码 (留空 = 开放热点)"
     default ""
-    depends on ITOY_ENABLE_DEBUG_MODE
+    depends on ITOY_ENABLE_DEBUG_MODE || ITOY_RUN_PROD_DEBUG
     help
         调试热点的 WPA2 密码; 留空则开放 (无密码), 方便调试。
 

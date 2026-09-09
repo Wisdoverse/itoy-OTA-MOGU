@@ -533,6 +533,8 @@ std::string BackendClient::BuildDeviceStatusJson() const {
     cJSON* build = cJSON_CreateObject();
 #if CONFIG_ITOY_RUN_NORMAL
     cJSON_AddStringToObject(build, "run_mode", "normal");
+#elif CONFIG_ITOY_RUN_PROD_DEBUG
+    cJSON_AddStringToObject(build, "run_mode", "prod_debug");
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
     cJSON_AddStringToObject(build, "run_mode", "debug");
 #else

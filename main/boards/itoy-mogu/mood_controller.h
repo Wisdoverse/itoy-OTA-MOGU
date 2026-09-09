@@ -59,11 +59,18 @@ public:
     void SetNightLight(bool on);  // 夜灯开关 (app 调用)
     // 后端下发情绪 -> 请求切到某状态 (线程安全: 仅置标志, 由 mood 任务下一 tick 应用)
     void RequestExternalMood(MoodState s);
+    // 调试网页命令 (生产调试模式: httpd 线程投递, mood 任务下一 tick 消费 —
+    // 与 RequestExternalMood 同款标志路由, 不跨任务直碰状态机/engine。
+    // 功能验证模式不 Start 本任务, 这些接口不被消费, 网页走直接调用路径)
+    void PostDebugDemo(MoodState s);   // 强制重放某情绪入场 (可连点重抽变体)
+    void PostDebugTouch(int8_t side);  // 模拟一次短摸 (side: -1左/+1右; 走完整事件链)
+    void PostDebugIdle();              // 立即播一条 idle (需电位器闭环)
     // 调试用: 直接进入某状态, 重放入场 RGB + 手势; 不跑自动状态机/触摸轮询。
     // 绕过 ChangeState 的去重 (state_ 先置非法值), 故可重复触发同一情绪。网页调试用。
     void DemoState(MoodState s);
 
     MoodState state() const { return state_; }
+    const char* state_name() const;    // 状态名 (调试网页显示)
 
 private:
     static void TaskFunc(void* arg);
@@ -124,6 +131,15 @@ private:
     // 后端下发情绪的待处理请求 (网络线程写, mood 任务读+清)
     volatile bool pending_external_mood_ = false;
     MoodState external_mood_ = MOOD_CALM;
+
+    // 调试网页命令的待处理请求 (httpd 线程写, mood 任务读+清; 生产调试模式用)
+    volatile bool pending_dbg_demo_ = false;
+    MoodState dbg_demo_state_ = MOOD_CALM;
+    volatile bool pending_dbg_touch_ = false;
+    int8_t dbg_touch_side_ = 0;
+    volatile bool pending_dbg_idle_ = false;
+    int8_t synth_side_ = 0;            // 模拟触摸侧 (-1左/+1右; 0 无) — 仅 mood 任务读写
+    uint32_t synth_until_ms_ = 0;      // 模拟触摸有效期 (PollTouch 在期内并入该侧读数)
 };
 
 #endif // MOOD_CONTROLLER_H_

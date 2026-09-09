@@ -3,9 +3,11 @@
 
 #include "sdkconfig.h"
 
-// 调试模式: WiFi 热点 + 网页调试 (仅 CONFIG_ITOY_ENABLE_DEBUG_MODE 时编译)
-// 网页: 控电机 / 控灯光 / 看电位器 / 电池 / 串口日志。关闭调试模式则本模块整体不编译。
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+// 调试网页: WiFi 热点 + 网页调试 (功能验证 ITOY_ENABLE_DEBUG_MODE 或
+// 生产调试 ITOY_RUN_PROD_DEBUG 时编译)。两档共用页面:
+//   功能验证 — 情绪按钮直接重放手势 (无自动状态机);
+//   生产调试 — 完整状态机在跑, 网页命令经 mood 邮箱由其任务执行。
+#if CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
 
 class MotorControl;
 class PowerControl;
@@ -22,6 +24,6 @@ public:
                MoodController* mood, RgbLed* rgb);
 };
 
-#endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE
+#endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
 
 #endif  // DEBUG_WEB_H_

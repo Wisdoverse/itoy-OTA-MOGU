@@ -1,5 +1,5 @@
 #include "sdkconfig.h"
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
 
 #include "debug_web.h"
 #include "config.h"
@@ -135,7 +135,7 @@ static const char kIndexHtml[] =
 "async function state(){try{let r=await fetch('/api/state');"
 "let j=await r.json();"
 "document.getElementById('state').innerHTML="
-"'点头电位器: '+j.nod+'<br>摇头电位器: '+j.shake"
+"'情绪状态: '+j.st+'<br>点头电位器: '+j.nod+'<br>摇头电位器: '+j.shake"
 "+'<br>电池: '+j.batt_mv+' mV ('+j.batt_pct+'%)';"
 "if(j.t){let h='';for(let i=0;i<4;i++){h+='CH'+i+' (GPIO'+(i+1)+'): '+j.t[i]+' '+"
 "(j.p[i]?'<b style=color:#f44>触摸</b>':'未触')+'<br>';}document.getElementById('touch').innerHTML=h;}"
@@ -188,10 +188,11 @@ static esp_err_t handle_state(httpd_req_t* req) {
             tp[i] = s_touch->IsPressed(i);
         }
     }
-    char json[300];
+    char json[320];
     snprintf(json, sizeof(json),
-             "{\"nod\":%lu,\"shake\":%lu,\"batt_mv\":%d,\"batt_pct\":%d,"
+             "{\"st\":\"%s\",\"nod\":%lu,\"shake\":%lu,\"batt_mv\":%d,\"batt_pct\":%d,"
              "\"t\":[%lu,%lu,%lu,%lu],\"p\":[%s,%s,%s,%s]}",
+             s_mood ? s_mood->state_name() : "-",
              s_motor ? s_motor->ReadNodPosition() : 0,
              s_motor ? s_motor->ReadShakePosition() : 0,
              s_power ? s_power->ReadBatteryMv() : 0,
@@ -233,11 +234,15 @@ static esp_err_t handle_motor(httpd_req_t* req) {
     return ESP_OK;
 }
 
-// 情绪演示: /api/mood?s=N -> DemoState(N) 重放该情绪的灯光+手势; s=stop -> 立即停手势;
-// s=touchL/touchR -> 即时反应(转向触摸侧保持); s=idle -> 立即播一条 idle。
-// 后两者需电位器闭环模式 (BehaviorEngine); 开环模式下被编译掉, 落到数值分支 (atoi=0 -> 演示 MOOD_OFF)。
-// 注: 调试模式不跑 mood Loop -> engine 无 Tick, 反应分支先手动推一拍,
-//     让已播完的演示情绪回落优先级 (cur_pri_), 否则会被静默丢弃。
+// 情绪演示: /api/mood?s=N -> 重放/请求该情绪; s=stop -> 立即停手势;
+// s=touchL/touchR -> 即时反应(转向触摸侧); s=idle -> 立即播一条 idle。
+// 两档模式语义不同:
+//   功能验证 (无 mood 任务): DemoState 直接重放; 反应按钮直接戳 engine,
+//     每次点击先模拟完整"按下-松开"并手动推一拍 Tick 回落优先级 (开环下
+//     engine 为空文件, 该两分支被编译掉, 落到数值分支 atoi=0 -> 演示 MOOD_OFF)。
+//   生产调试 (mood 任务在跑): 全部投邮箱由 mood 任务执行 (不跨任务直碰
+//     状态机/engine); touchL/touchR 模拟一次 ~1.5s 短摸走完整事件链
+//     (转头保持→自动松开→回中→短按分类), 开环下也可用 (走开环手势路径)。
 static esp_err_t handle_mood(httpd_req_t* req) {
     char query[32], val[16];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
@@ -251,6 +256,14 @@ static esp_err_t handle_mood(httpd_req_t* req) {
     if (strcmp(val, "stop") == 0) {
         if (s_motor) s_motor->StopGesture();
         ESP_LOGI(TAG, "mood: stop gesture");
+#if CONFIG_ITOY_RUN_PROD_DEBUG
+    } else if (strcmp(val, "touchL") == 0 || strcmp(val, "touchR") == 0) {
+        if (s_mood) s_mood->PostDebugTouch(val[5] == 'L' ? -1 : 1);
+        ESP_LOGI(TAG, "mood: sim touch %s", val);
+    } else if (strcmp(val, "idle") == 0) {
+        if (s_mood) s_mood->PostDebugIdle();
+        ESP_LOGI(TAG, "mood: force idle");
+#else
 #if CONFIG_ITOY_HOME_POT
     } else if (strcmp(val, "touchL") == 0 || strcmp(val, "touchR") == 0) {
         if (s_mood && s_mood->engine()) {
@@ -265,6 +278,7 @@ static esp_err_t handle_mood(httpd_req_t* req) {
         if (s_mood && s_mood->engine()) s_mood->engine()->ForceIdle();
         ESP_LOGI(TAG, "mood: force idle");
 #endif
+#endif
     } else {
         int s = atoi(val);
         if (s < 0 || s > 10 || !s_mood) {
@@ -272,7 +286,11 @@ static esp_err_t handle_mood(httpd_req_t* req) {
             return ESP_OK;
         }
         ESP_LOGI(TAG, "mood demo: state=%d", s);
+#if CONFIG_ITOY_RUN_PROD_DEBUG
+        s_mood->PostDebugDemo((MoodState)s);
+#else
         s_mood->DemoState((MoodState)s);
+#endif
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
@@ -474,4 +492,4 @@ void DebugWeb::Start(MotorControl* motor, PowerControl* power, TouchPad* touch,
     ESP_LOGI(TAG, "调试网页就绪 (连上热点自动弹页)");
 }
 
-#endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE
+#endif  // CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG

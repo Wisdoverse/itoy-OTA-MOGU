@@ -163,8 +163,14 @@ Touch ──→ MoodController ──→ BehaviorEngine ──→ MotorControl::
   离开保持态即停 (新情绪清联动 / EnterCalm 亦清)。
   前提: COMFORT 灯已改慢呼吸 (5000ms 25%<->45%, 入场先 FadeTo 过渡)。
 
-调试: 网页 `/api/mood?s=touchL|touchR|idle` 手动触发 (调试模式无 mood Loop,
-反应按钮每次点击先模拟完整"按下-松开"并手动推一拍 Tick 回落优先级);
+调试: 网页 `/api/mood?s=touchL|touchR|idle` 手动触发, 两档模式语义不同 —
+- 功能验证 (ITOY_ENABLE_DEBUG_MODE, 无 mood Loop): 情绪按钮 DemoState 直接
+  重放; 反应按钮直接戳 engine, 每次点击先模拟完整"按下-松开"并手动推一拍
+  Tick 回落优先级;
+- 生产调试 (ITOY_RUN_PROD_DEBUG, 完整状态机+网页, 无云端): 命令投 mood 邮箱
+  由其任务执行 (PostDebugDemo/Touch/Idle, 不跨任务直碰状态机/engine);
+  touchL/touchR 模拟一次 ~1.5s 短摸走完整事件链 (转头保持→自动松开→回中→
+  短按分类, 开环下也可用); /api/state 的 `st` 字段实时报当前情绪状态。
 串口统一日志 `BEHAVIOR play pri=N kind=... dir=... ease=N`。
 缓动回退: 全表 ease 改 0 = 恒速旧行为 (除 8 张脚本表外, 反应/呼吸段/idle 随拍
 共 5 处内联 MakeStep 亦硬编 ease=1, 回退时一并改)。

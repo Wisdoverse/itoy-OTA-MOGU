@@ -23,7 +23,7 @@
  *   3. 有新版本 → 自动下载升级并重启
  *   4. 标记当前版本有效（防止回滚），流程结束
  */
-#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_RUN_PROD_DEBUG && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
 static void CheckNewVersion(Ota& ota) {
     const int MAX_RETRY = 10;
     int retry_count = 0;
@@ -90,7 +90,7 @@ static void CheckNewVersion(Ota& ota) {
 
     ESP_LOGI(TAG, "========== 版本检查流程完成 ==========");
 }
-#endif  // !CONFIG_ITOY_ENABLE_DEBUG_MODE
+#endif  // !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_RUN_PROD_DEBUG
 
 extern "C" void app_main(void)
 {
@@ -115,9 +115,9 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "========== 网络连接完成 ==========");
 
     // OTA 检查版本 (固件 / MQTT / WebSocket 配置 / server_time)
-    // 调试模式是 AP-only(无 STA), 跳过 OTA: 否则 OTA 里 GetBoardJson->GetRssi()
+    // 调试/生产调试模式是 AP-only(无 STA), 跳过 OTA: 否则 OTA 里 GetBoardJson->GetRssi()
     // 会因无 STA 连接 ESP_ERROR_CHECK abort 导致重启循环。
-#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_RUN_PROD_DEBUG && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
     Ota ota;
     CheckNewVersion(ota);
     // 启动后端实时通道 (MQTT/WebSocket + MCP), 仅正常模式; OTA 已写入连接配置到 NVS

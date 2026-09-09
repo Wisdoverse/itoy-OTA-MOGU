@@ -8,8 +8,8 @@
 
 #include <esp_log.h>
 
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
-// 调试模式: WiFi 热点 + 网页调试 (控电机/电位器/电池/触摸/情绪演示/日志), 跳过配网
+#if CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
+// 调试网页: 功能验证 (演示重放) 与生产调试 (完整状态机+网页) 两档共用
 #include "debug_web.h"
 #else
 // 正常模式: 情绪蘑菇 + IMU/配网
@@ -18,7 +18,7 @@
 #endif
 #include "backend_client.h"
 #endif
-// mood_controller: 正常模式跑完整状态机; 调试模式仅用 DemoState 重放手势供网页测试
+// mood_controller: 正常/生产调试模式跑完整状态机; 功能验证模式仅用 DemoState 重放
 #include "mood_controller.h"
 
 #define TAG "ItoyMogu"
@@ -32,7 +32,7 @@ private:
 #if CONFIG_ITOY_HOME_POT
     BehaviorEngine behavior_;  // 行为层: 情绪变体/idle/即时反应/呼吸联动 (由 mood tick 驱动)
 #endif
-#if CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
     DebugWeb debug_;
 #else
 #if CONFIG_ITOY_ENABLE_IMU
@@ -40,7 +40,7 @@ private:
 #endif
     BackendClient backend_;
 #endif
-    MoodController mood_;   // 正常=完整状态机; 调试=网页 DemoState 重放 (selftest 不用)
+    MoodController mood_;   // 正常/生产调试=完整状态机; 功能验证=网页 DemoState 重放 (selftest 不用)
 
     // 开机提示: 白色呼吸 BOOT_BREATH_TIMES 次 (低电量改红色); 调试/正常模式共用。
     // 阻塞播完再继续初始化, 避免被后续灯光效果 (mood/调试网页) 覆盖掉
@@ -58,6 +58,8 @@ public:
         ESP_LOGI(TAG, "初始化 itoy-mogu 开发板 (%s)",
 #if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
                  "电机自检模式"
+#elif CONFIG_ITOY_RUN_PROD_DEBUG
+                 "生产调试模式"
 #elif CONFIG_ITOY_ENABLE_DEBUG_MODE
                  "调试模式"
 #else
@@ -108,7 +110,7 @@ public:
         );
         ESP_LOGI(TAG, "调试模式: motor + adc + rgb + touch + 情绪演示 就绪 (网页由 StartNetwork 启动)");
 #else
-        // ---- 正常模式 ----
+        // ---- 正常/生产调试模式 (共用完整初始化; 生产调试不启云端/IMU) ----
 #if CONFIG_ITOY_ENABLE_MOTOR
         motor_.Initialize();
         power_.SetBatteryAdc(motor_.GetAdcHandle(), (adc_channel_t)BATTERY_ADC_CHAN);
@@ -128,8 +130,10 @@ public:
                          , &behavior_
 #endif
         );
-        mood_.Start();
+        mood_.Start();   // 完整状态机: POWER_ON 入场 → CALM, 触摸/idle/呼吸联动全跑
+#if CONFIG_ITOY_RUN_NORMAL
         backend_.Initialize(&power_, &touch_, &motor_, &mood_, &rgb_);
+#endif
 
 #if CONFIG_ITOY_ENABLE_MOTOR
         ESP_LOGI(TAG, "Nod pot=%lu, Shake pot=%lu, Batt=%dmV, RGB=%dLEDs",
@@ -139,7 +143,7 @@ public:
         ESP_LOGI(TAG, "RGB=%dLEDs (motor disabled, Batt 未采集)", rgb_.count());
 #endif
 
-#if CONFIG_ITOY_ENABLE_IMU
+#if CONFIG_ITOY_RUN_NORMAL && CONFIG_ITOY_ENABLE_IMU
         esp_err_t imu_ret = imu_.Initialize();
         if (imu_ret == ESP_OK) {
             ImuData data;
@@ -152,7 +156,11 @@ public:
             ESP_LOGW(TAG, "IMU not available, continuing without it");
         }
 #endif
+#if CONFIG_ITOY_RUN_PROD_DEBUG
+        ESP_LOGI(TAG, "=== itoy-mogu 生产调试模式就绪 (完整状态机+网页, 无云端) ===");
+#else
         ESP_LOGI(TAG, "=== itoy-mogu 情绪蘑菇初始化完成 ===");
+#endif
 #endif
     }
 
@@ -160,11 +168,11 @@ public:
         return "itoy-mogu";
     }
 
-    // 调试模式: 起网页调试 AP (不调正常配网, 避免与调试 AP 冲突); 否则正常配网
+    // 功能验证/生产调试: 起网页调试 AP (不调正常配网, 避免与调试 AP 冲突); 否则正常配网
     void StartNetwork() override {
 #if CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
         ESP_LOGI(TAG, "电机自检模式: 跳过网络");
-#elif CONFIG_ITOY_ENABLE_DEBUG_MODE
+#elif CONFIG_ITOY_ENABLE_DEBUG_MODE || CONFIG_ITOY_RUN_PROD_DEBUG
         debug_.Start(&motor_, &power_, &touch_, &mood_, &rgb_);
 #else
         WifiBoard::StartNetwork();
@@ -173,7 +181,7 @@ public:
 
     // OTA 检查完成后启动后端实时通道 (仅正常模式)
     void StartBackendService() override {
-#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_RUN_PROD_DEBUG && !CONFIG_ITOY_ENABLE_MOTOR_SELFTEST
         backend_.Start();
 #endif
     }
@@ -183,7 +191,7 @@ public:
     PowerControl& GetPower() { return power_; }
     RgbLed& GetRgb() { return rgb_; }
     MoodController& GetMood() { return mood_; }
-#if !CONFIG_ITOY_ENABLE_DEBUG_MODE
+#if !CONFIG_ITOY_ENABLE_DEBUG_MODE && !CONFIG_ITOY_RUN_PROD_DEBUG
     TouchPad& GetTouch() { return touch_; }
 #if CONFIG_ITOY_ENABLE_IMU
     ImuQMI8658A& GetImu() { return imu_; }

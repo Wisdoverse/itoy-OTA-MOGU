@@ -62,6 +62,8 @@
 
 // 调试: 心跳打印间隔 (ms), 0 = 关闭
 #define DBG_HEARTBEAT_MS   5000
+// 调试网页模拟触摸时长 (<HOLD_ONE_MS: 短按 -> 松开走 HAPPY 分类链路)
+#define DBG_SIM_TOUCH_MS   1500
 
 static const char* StateName(MoodState s) {
     switch (s) {
@@ -148,6 +150,29 @@ void MoodController::DemoState(MoodState s) {
     ChangeState(s);
 }
 
+void MoodController::PostDebugDemo(MoodState s) {
+    // 先写值再置标志 (同 RequestExternalMood); 网页互动也算"在用",
+    // 不触发无互动自动关机
+    last_touch_ms_ = tick_ms_;
+    dbg_demo_state_ = s;
+    pending_dbg_demo_ = true;
+}
+
+void MoodController::PostDebugTouch(int8_t side) {
+    last_touch_ms_ = tick_ms_;
+    dbg_touch_side_ = side;
+    pending_dbg_touch_ = true;
+}
+
+void MoodController::PostDebugIdle() {
+    last_touch_ms_ = tick_ms_;
+    pending_dbg_idle_ = true;
+}
+
+const char* MoodController::state_name() const {
+    return StateName(state_);
+}
+
 void MoodController::TaskFunc(void* arg) {
     static_cast<MoodController*>(arg)->Loop();
 }
@@ -155,6 +180,28 @@ void MoodController::TaskFunc(void* arg) {
 void MoodController::Loop() {
     while (true) {
         tick_ms_ += 100;
+
+        // 调试网页命令 (生产调试模式: httpd 线程投递, 统一在 mood 任务执行 —
+        // 避免跨任务直碰状态机/engine; 功能验证模式不 Start 本任务, 标志恒空)
+        if (pending_dbg_demo_) {
+            pending_dbg_demo_ = false;
+            DemoState(dbg_demo_state_);
+        }
+        if (pending_dbg_touch_) {
+            pending_dbg_touch_ = false;
+            synth_side_ = dbg_touch_side_;
+            synth_until_ms_ = tick_ms_ + DBG_SIM_TOUCH_MS;
+            ESP_LOGI(TAG, "sim touch %s for %dms", synth_side_ < 0 ? "LEFT" : "RIGHT",
+                     DBG_SIM_TOUCH_MS);
+        }
+        if (pending_dbg_idle_) {
+            pending_dbg_idle_ = false;
+#if CONFIG_ITOY_HOME_POT
+            if (engine_) engine_->ForceIdle();
+#else
+            ESP_LOGI(TAG, "dbg idle: 需电位器闭环模式");
+#endif
+        }
 
         PollTouch(tick_ms_);
         PollBattery(tick_ms_);
@@ -267,6 +314,12 @@ void MoodController::OnShortTap(uint32_t now_ms) {
 void MoodController::PollTouch(uint32_t now_ms) {
     bool l = LeftPressed();
     bool r = RightPressed();
+    // 生产调试: 网页模拟触摸 — 有效期内并入对应侧读数, 从按下边沿到松开
+    // 走完整事件链 (即时反应/长按分类/短按计数), 与真手指无差别
+    if (synth_until_ms_ && now_ms < synth_until_ms_) {
+        if (synth_side_ < 0) l = true;
+        else                 r = true;
+    }
     bool both = l && r;
     bool any = l || r;
 
