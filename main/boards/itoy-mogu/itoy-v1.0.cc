@@ -4,6 +4,7 @@
 #include "power_control.h"
 #include "rgb_led.h"
 #include "touch_pad.h"
+#include "behavior_engine.h"   // 行为层 (开环模式下为空文件, 自带 POT 守卫)
 
 #include <esp_log.h>
 
@@ -28,6 +29,9 @@ private:
     PowerControl power_;
     RgbLed rgb_;
     TouchPad touch_;
+#if CONFIG_ITOY_HOME_POT
+    BehaviorEngine behavior_;  // 行为层: 情绪变体/idle/即时反应/呼吸联动 (由 mood tick 驱动)
+#endif
 #if CONFIG_ITOY_ENABLE_DEBUG_MODE
     DebugWeb debug_;
 #else
@@ -92,9 +96,16 @@ public:
         power_.SetIndicator(&rgb_);   // 关机前呼吸提示
         PlayBootIndication();         // 开机提示: 呼吸 3 次
         motor_.StartMotorTask();   // 启动步进消费任务 -> 驱动情绪手势播放器 (PlayGesture)
+#if CONFIG_ITOY_HOME_POT
+        behavior_.Initialize(&motor_, &rgb_);
+#endif
         // 情绪演示: 仅 Initialize 接指针, 不 Start() -> 不跑自动状态机/触摸轮询,
         // 由网页 /api/mood -> DemoState() 手动触发各情绪的灯光+手势
-        mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
+        mood_.Initialize(&touch_, &motor_, &rgb_, &power_
+#if CONFIG_ITOY_HOME_POT
+                         , &behavior_
+#endif
+        );
         ESP_LOGI(TAG, "调试模式: motor + adc + rgb + touch + 情绪演示 就绪 (网页由 StartNetwork 启动)");
 #else
         // ---- 正常模式 ----
@@ -108,8 +119,15 @@ public:
         PlayBootIndication();         // 开机提示: 呼吸 3 次 (须在 mood_.Start() 前, 否则被情绪灯覆盖)
 #if CONFIG_ITOY_ENABLE_MOTOR
         motor_.StartMotorTask();
+#if CONFIG_ITOY_HOME_POT
+        behavior_.Initialize(&motor_, &rgb_);
 #endif
-        mood_.Initialize(&touch_, &motor_, &rgb_, &power_);
+#endif
+        mood_.Initialize(&touch_, &motor_, &rgb_, &power_
+#if CONFIG_ITOY_HOME_POT
+                         , &behavior_
+#endif
+        );
         mood_.Start();
         backend_.Initialize(&power_, &touch_, &motor_, &mood_, &rgb_);
 
