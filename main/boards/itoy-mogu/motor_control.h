@@ -106,11 +106,12 @@ struct DualGestureStep {
 // 位置手势段 (电位器闭环): 双轴各自朝目标读数步进, 各自进死区即停, 两轴到齐进下一段。
 // 目标填 -1 = 该轴本段不动。目标会被自动夹进 [电子限位±死区] 内。
 struct PosStep {
-    int16_t nod_target;     // 点头目标读数 (低头=大, 抬头=小)
-    int16_t shake_target;   // 摇头目标读数 (右=大, 左=小)
-    uint16_t delay_ms;      // 每步延时 (速度)
+    int16_t nod_target;       // 点头目标读数 (低头=大, 抬头=小)
+    int16_t shake_target;     // 摇头目标读数 (右=大, 左=小)
+    uint16_t cruise_delay_ms; // 巡航每步延时 (速度); ease=1 时为中段速度, 起步/收尾自动放慢
+    uint8_t ease;             // 0=恒速 (旧行为) 1=S 形缓动 (起步慢-中段快-到位缓停)
 };
-#define MAX_POS_STEPS 12
+#define MAX_POS_STEPS 20
 #endif  // CONFIG_ITOY_HOME_POT
 
 class MotorControl {
@@ -216,6 +217,7 @@ private:
     bool pos_shake_done_ = false;           // 本段摇头轴已到目标
     volatile bool pos_active_ = false;
     bool pos_auto_center_ = false;          // 结束后自动回中
+    int pos_seg_start_dist_ = 0;           // 本段起步时两轴到目标合计距离 (缓动进度基准)
 #endif
 
     // 相对定位 (电位器未接入时): pos_ = 自"记录零位"以来的累计步数 (有符号, +=cw)。

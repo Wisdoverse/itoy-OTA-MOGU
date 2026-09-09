@@ -497,24 +497,33 @@ void MotorControl::PlayPosGesture(const PosStep* steps, int n, bool auto_center)
     pos_active_ = true;
     gesture_done_ = false;
     xSemaphoreGive(step_mutex_);
-    ESP_LOGI(TAG, "pos gesture play: %d segs auto_center=%d (seg0 nod=%d shake=%d %dms)",
+    ESP_LOGI(TAG, "pos gesture play: %d segs auto_center=%d (seg0 nod=%d shake=%d %dms ease=%d)",
              len, auto_center ? 1 : 0,
-             (int)pos_seq_[0].nod_target, (int)pos_seq_[0].shake_target, (int)pos_seq_[0].delay_ms);
+             (int)pos_seq_[0].nod_target, (int)pos_seq_[0].shake_target,
+             (int)pos_seq_[0].cruise_delay_ms, (int)pos_seq_[0].ease);
 }
 
 // 推进位置手势一微步: 本段内两轴各自朝目标读数步进, 各自进死区即停;
 // 撞电子限位 (StepOnceLimited 拒绝) 也视为该轴到位, 防卡死。两轴到齐进下一段。
 // 末段结束: auto_center -> 转回中 (homing_), 否则断电保持姿态。
+// ease=1: 位置闭环无法预知步数, 以"剩余距离/段起步距离"估算进度 p (千分位),
+//   速度因子取 smoothstep 导数 6p(1-p) (中段峰值 1.5), 每步延时 = 巡航/速度因子,
+//   钳 [巡航/2, 巡航x4] — 起步/收尾各约 1/4 行程慢, 中段可略快于巡航。
+//   ease=0 恒速 = 旧行为 (全部旧脚本缺省 0, 行为不变, 可一键回退)。
 int MotorControl::PosTick() {
     const PosStep& seg = pos_seq_[pos_idx_];
 
+    int dist = 0;   // 两轴剩余距离合计 (步进前测量; 缓动进度分子)
     if (seg.nod_target < 0) pos_nod_done_ = true;
     else if (!pos_nod_done_) {
         StepperMotor* m = motors_[MOTOR_NOD];
         int target = ClampPotTarget(m, seg.nod_target);
         int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
         if (std::abs(diff) <= POT_CENTER_TOL) pos_nod_done_ = true;
-        else if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_nod_done_ = true;
+        else {
+            dist += std::abs(diff);
+            if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_nod_done_ = true;
+        }
     }
     if (seg.shake_target < 0) pos_shake_done_ = true;
     else if (!pos_shake_done_) {
@@ -522,8 +531,13 @@ int MotorControl::PosTick() {
         int target = ClampPotTarget(m, seg.shake_target);
         int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
         if (std::abs(diff) <= POT_CENTER_TOL) pos_shake_done_ = true;
-        else if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_shake_done_ = true;
+        else {
+            dist += std::abs(diff);
+            if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_shake_done_ = true;
+        }
     }
+
+    if (pos_seg_steps_ == 0) pos_seg_start_dist_ = dist;   // 段起步: 记录合计距离
 
     if (++pos_seg_steps_ > MOTOR_STEPS_PER_REV / 8)   // 段超限保护 (卡住跳段)
         pos_nod_done_ = pos_shake_done_ = true;
@@ -548,7 +562,21 @@ int MotorControl::PosTick() {
             return 50;
         }
     }
-    return seg.delay_ms ? (int)seg.delay_ms : MOTOR_STEP_DELAY_MS;
+
+    int cruise = seg.cruise_delay_ms ? (int)seg.cruise_delay_ms : MOTOR_STEP_DELAY_MS;
+    if (!seg.ease) return cruise;   // 恒速 (旧行为)
+
+    int d0 = pos_seg_start_dist_;
+    if (d0 <= 0) return cruise;
+    int p = 1000 - dist * 1000 / d0;                    // 进度 0~1000
+    if (p < 0) p = 0;
+    if (p > 1000) p = 1000;
+    int v = 6 * p * (1000 - p) / 1000;                  // smoothstep 导数 0~1500
+    if (v < 250) v = 250;                               // 速度下限 0.25 -> 延时上限 4x
+    int delay = cruise * 1000 / v;
+    int lo = cruise / 2 > 1 ? cruise / 2 : 1;           // 延时下限 = 巡航/2 (至少 1ms)
+    int hi = cruise * 4;
+    return delay < lo ? lo : (delay > hi ? hi : delay);
 }
 #endif  // CONFIG_ITOY_HOME_POT
 
