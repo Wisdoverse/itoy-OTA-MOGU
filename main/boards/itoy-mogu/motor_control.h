@@ -108,7 +108,7 @@ struct DualGestureStep {
 struct PosStep {
     int16_t nod_target;       // 点头目标读数 (低头=大, 抬头=小)
     int16_t shake_target;     // 摇头目标读数 (右=大, 左=小)
-    uint16_t cruise_delay_ms; // 巡航每步延时 (速度); ease=1 时为中段速度, 起步/收尾自动放慢
+    uint16_t cruise_delay_ms; // 巡航每步延时 (速度基准); ease=1 时中段约 1.5 倍速, 起步/收尾自动放慢
     uint8_t ease;             // 0=恒速 (旧行为) 1=S 形缓动 (起步慢-中段快-到位缓停)
 };
 #define MAX_POS_STEPS 20
