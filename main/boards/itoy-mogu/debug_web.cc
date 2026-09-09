@@ -7,6 +7,8 @@
 #include "power_control.h"
 #include "touch_pad.h"
 #include "mood_controller.h"
+#include "behavior_engine.h"   // OnTouchDown/ForceIdle (开环模式下为空文件)
+#include <esp_timer.h>         // 手动推 Tick 用开机毫秒时基
 #include "rgb_led.h"
 
 #include <stdio.h>
@@ -123,6 +125,9 @@ static const char kIndexHtml[] =
 "<button onclick=md(9)>夜灯</button>"
 "<button onclick=md(10)>转头</button>"
 "<button onclick=md('stop') style='background:#a33;color:#fff'>停手势</button>"
+"<br>行为层: <button onclick=md('touchL')>摸左</button>"
+"<button onclick=md('touchR')>摸右</button>"
+"<button onclick=md('idle')>闲置动一下</button>"
 "<h2>状态</h2><div class=st id=state>读取中…</div>"
 "<h2>触摸 (GPIO1-4)</h2><div class=st id=touch>读取中…</div>"
 "<h2>串口日志</h2><textarea id=log readonly></textarea>"
@@ -228,7 +233,11 @@ static esp_err_t handle_motor(httpd_req_t* req) {
     return ESP_OK;
 }
 
-// 情绪演示: /api/mood?s=N -> DemoState(N) 重放该情绪的灯光+手势; s=stop -> 立即停手势
+// 情绪演示: /api/mood?s=N -> DemoState(N) 重放该情绪的灯光+手势; s=stop -> 立即停手势;
+// s=touchL/touchR -> 即时反应(转向触摸侧保持); s=idle -> 立即播一条 idle。
+// 后两者需电位器闭环模式 (BehaviorEngine); 开环模式下被编译掉, 落到数值分支 (atoi=0 -> 演示 MOOD_OFF)。
+// 注: 调试模式不跑 mood Loop -> engine 无 Tick, 反应分支先手动推一拍,
+//     让已播完的演示情绪回落优先级 (cur_pri_), 否则会被静默丢弃。
 static esp_err_t handle_mood(httpd_req_t* req) {
     char query[32], val[16];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
@@ -242,6 +251,17 @@ static esp_err_t handle_mood(httpd_req_t* req) {
     if (strcmp(val, "stop") == 0) {
         if (s_motor) s_motor->StopGesture();
         ESP_LOGI(TAG, "mood: stop gesture");
+#if CONFIG_ITOY_HOME_POT
+    } else if (strcmp(val, "touchL") == 0 || strcmp(val, "touchR") == 0) {
+        if (s_mood && s_mood->engine()) {
+            s_mood->engine()->Tick((uint32_t)(esp_timer_get_time() / 1000));
+            s_mood->engine()->OnTouchDown(val[5] == 'L' ? SIDE_LEFT : SIDE_RIGHT);
+        }
+        ESP_LOGI(TAG, "mood: reactive %s", val);
+    } else if (strcmp(val, "idle") == 0) {
+        if (s_mood && s_mood->engine()) s_mood->engine()->ForceIdle();
+        ESP_LOGI(TAG, "mood: force idle");
+#endif
     } else {
         int s = atoi(val);
         if (s < 0 || s > 10 || !s_mood) {
