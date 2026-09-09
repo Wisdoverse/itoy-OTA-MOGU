@@ -80,6 +80,23 @@ choice ITOY_HOME_MODE
             开环模式则保持原步数脚本不变。
 endchoice
 
+# ---- 闲置性格档 (BehaviorEngine idle 小动作, 需电位器闭环) ----
+choice ITOY_PERSONALITY
+    prompt "闲置性格档 (idle 小动作频率/幅度)"
+    default ITOY_PERSONALITY_MODERATE
+    depends on ITOY_HOME_POT
+    help
+        CALM 平静状态下随机小动作的性格档: 影响随机间隔与幅度系数,
+        活泼档额外解锁"摇头晃脑"动作。
+
+    config ITOY_PERSONALITY_QUIET
+        bool "安静 (60~180s 一次, 幅度 x0.6)"
+    config ITOY_PERSONALITY_MODERATE
+        bool "适中 (20~60s 一次, 幅度 x1.0, 默认)"
+    config ITOY_PERSONALITY_LIVELY
+        bool "活泼 (10~30s 一次, 幅度 x1.3 + 摇头晃脑)"
+endchoice
+
 # ---- 运行模式 (三选一, 互斥) ----
 choice ITOY_RUN_MODE
     prompt "运行模式 (三选一)"
