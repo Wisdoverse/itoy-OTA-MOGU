@@ -36,6 +36,7 @@ private:
     std::string firmware_url_;
 
     bool Upgrade(const std::string& firmware_url);
+    bool UpgradeOnce(const std::string& firmware_url);
     std::function<void(int progress, size_t speed)> upgrade_callback_;
     std::vector<int> ParseVersion(const std::string& version);
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);

@@ -9,6 +9,9 @@
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
+#include <esp_wifi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <cstring>
 #include <vector>
@@ -16,6 +19,8 @@
 #include <algorithm>
 
 #define TAG "Ota"
+// 整包下载自动重试次数 (单次尝试易受空口瞬态影响: 速度衰减 -> 停滞 -> 超时)
+#define OTA_DOWNLOAD_ATTEMPTS 3
 
 
 Ota::Ota() {
@@ -223,6 +228,30 @@ void Ota::MarkCurrentVersionValid() {
 }
 
 bool Ota::Upgrade(const std::string& firmware_url) {
+    // 下载窗口关闭 WiFi 省电: 默认 modem sleep (~307ms 才醒一次收包) 把吞吐压到十几 KB/s,
+    // 1.38MB 要 ~85s, 空口稍抖即衰减超时; 全速后数秒完成。结束后恢复原模式, 平时仍省电。
+    wifi_ps_type_t ps_prev = WIFI_PS_MIN_MODEM;
+    esp_wifi_get_ps(&ps_prev);
+    if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable WiFi power save");
+    }
+
+    bool ok = false;
+    for (int attempt = 1; attempt <= OTA_DOWNLOAD_ATTEMPTS && !ok; attempt++) {
+        if (attempt > 1) {
+            int wait_s = (attempt - 1) * 10;   // 10s, 20s 退避
+            ESP_LOGW(TAG, "Upgrade attempt %d/%d, retry in %ds", attempt, OTA_DOWNLOAD_ATTEMPTS, wait_s);
+            vTaskDelay(pdMS_TO_TICKS(wait_s * 1000));
+        }
+        ok = UpgradeOnce(firmware_url);   // 单次完整下载+写入+校验, 失败路径均已释放 OTA 句柄
+    }
+
+    esp_wifi_set_ps(ps_prev);
+    return ok;
+}
+
+// 单次完整升级尝试 (下载 -> 写入 -> 校验 -> 设启动分区), 供 Upgrade 重试
+bool Ota::UpgradeOnce(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
@@ -260,6 +289,9 @@ bool Ota::Upgrade(const std::string& firmware_url) {
         int ret = http->Read(buffer, sizeof(buffer));
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            if (image_header_checked) {
+                esp_ota_abort(update_handle);   // 读失败同样要释放句柄, 与写失败路径一致
+            }
             return false;
         }
 
