@@ -282,11 +282,14 @@ bool Ota::UpgradeOnce(const std::string& firmware_url) {
         return false;
     }
 
-    char buffer[512];
+    // 读缓冲 512B→16KB (堆): 小读放大 esp_ota_write 调用次数 (1.76MB/512B=3442 次),
+    // 且网络收包与写闪存在 512B 粒度上交替等待; 主任务栈仅 8KB 放不下, 用堆 (下载期空闲 ~220KB)
+    std::vector<char> read_buf(16384);
+    char* buffer = read_buf.data();
     size_t total_read = 0, recent_read = 0;
     auto last_calc_time = esp_timer_get_time();
     while (true) {
-        int ret = http->Read(buffer, sizeof(buffer));
+        int ret = http->Read(buffer, read_buf.size());
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
             if (image_header_checked) {
