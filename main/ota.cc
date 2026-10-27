@@ -266,6 +266,9 @@ bool Ota::UpgradeOnce(const std::string& firmware_url) {
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
+    // 单次读停滞上限 30s→10s: 实测跨境单流会被动态限速到 20s+ 级空窗, 与其等死不如
+    // 尽快断线重连 — 新 TCP 连接立即恢复全速 (重试由 Upgrade 统一调度)
+    http->SetTimeout(10000);
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;

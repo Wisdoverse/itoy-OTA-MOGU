@@ -72,10 +72,12 @@ CONFIG_ESP_WIFI_IRAM_OPT=n
 CONFIG_ESP_WIFI_RX_IRAM_OPT=n
 # 启用 WiFi 动态接收管理缓冲，按需分配
 CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER=y
-# WiFi 静态接收缓冲区数量（减少以省内存）
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
-# WiFi 动态接收缓冲区数量上限
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+# WiFi 静态接收缓冲区数量。原省内存值 6：esp_ota_write 擦闪时 CPU 停顿，WiFi RX 仅 ~20KB 缓冲,
+# 吞不下 46080 TCP 窗口的突发在途包 → 溢出丢包 → 发送方 RTO 退避数秒 (OTA 实测死段 1 记录/2.4s);
+# 12 静态(+9.6KB RAM)+24 动态 ≈ 57KB > 46KB 窗口, 且静态数即 AMPDU BA 窗口(6→12)
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=12
+# WiFi 动态接收缓冲区数量上限（按需分配, 上限提高只在突发时占内存）
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24
 # 使用精简版 printf/scanf 格式化，减少代码体积
 CONFIG_NEWLIB_NANO_FORMAT=y
 # 关闭 WiFi 企业级认证支持（不需要，节省空间）
@@ -89,6 +91,11 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 # 窗口是上限非预分配，仅传输期间多占几十 KB pbuf 内存，平时无开销；wss 语音流同链路受益。
 CONFIG_LWIP_TCP_WND_DEFAULT=46080
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=46080
+# TCP 接收邮箱（默认 6 段）：窗口放大到 32 段后邮箱也要跟上, 否则 lwIP 反复 ERR_MEM 重注入
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+# TCP SACK 选择性重传（IDF 默认关）：无 SACK 时丢 1 段即整窗回退N重传、cwnd 反复坍缩,
+# 跨境丢包链路上实测同一时刻 PC 319KB/s vs 设备 7KB/s; 开启后发送方可选择性恢复
+CONFIG_LWIP_TCP_SACK_OUT=y
 
 # ============================================================
 # 音频编解码器配置
