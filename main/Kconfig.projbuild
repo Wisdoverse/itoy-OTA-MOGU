@@ -97,6 +97,14 @@ choice ITOY_PERSONALITY
         bool "活泼 (10~30s 一次, 幅度 x1.3 + 摇头晃脑)"
 endchoice
 
+config ITOY_DISABLE_IDLE
+    bool "关闭 CALM 闲置小动作 (标定/防干扰)"
+    default n
+    help
+        电位器闭环模式下 CALM 平静态的随机 idle 小动作 (转头/轻点头/
+        换姿势等) 整体不触发, 标定回中/电子限位时避免自发动作干扰。
+        优先于上面的性格档; 调试网页的 idle 按钮仍可手动单发。
+
 # ---- 运行模式 (四选一, 互斥) ----
 choice ITOY_RUN_MODE
     prompt "运行模式 (四选一)"
@@ -171,6 +179,15 @@ config ITOY_TOUCH_CH2_BASELINE
 config ITOY_TOUCH_CH3_BASELINE
     int "CH3 (GPIO4) 触摸基线 (0=开机自动测量)"
     default 0
+
+config ITOY_DISABLE_TOUCH
+    bool "关闭真实触摸输入 (标定/防干扰)"
+    default n
+    help
+        触摸硬件仍初始化、调试网页仍显示各通道读数, 但真实触摸不再
+        触发任何情绪/电机动作; 同时屏蔽"10min 无触摸转困倦 / 再 5min
+        自动关机" (视为持续在用, 标定期间不会自发动)。调试网页的
+        "摸左/摸右"模拟触摸不受影响, 仍可手动走完整事件链。
 
 # ---- 云端调试上报 (get_device_status 的 debug 节, 按项开关) ----
 config ITOY_REPORT_DEBUG

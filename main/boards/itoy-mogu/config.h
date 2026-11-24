@@ -39,11 +39,12 @@
 #define POT_ADC_WIDTH       ADC_BITWIDTH_12
 #define POT_MAX_VALUE       4095
 
-// 实测结构满行程电位器读数 (2026-09-03) — 电子限位 + 位置手势基准
-#define POT_NOD_UP_RAW      1300   // 点头轴: 抬头最大 (读数小端)
-#define POT_NOD_DOWN_RAW    2570   // 点头轴: 低头最大 (读数大端)
-#define POT_SHAKE_LEFT_RAW  1500   // 摇头轴: 左摆最大
-#define POT_SHAKE_RIGHT_RAW 2320   // 摇头轴: 右摆最大
+// 实测结构满行程电位器读数 (2026-11-24) — 电子限位 + 位置手势基准
+// 单次读数有波动 (±20 级), 由 POT_LIMIT_MARGIN 内缩吸收
+#define POT_NOD_UP_RAW      1277   // 点头轴: 抬头最大 (读数小端)
+#define POT_NOD_DOWN_RAW    2585   // 点头轴: 低头最大 (读数大端)
+#define POT_SHAKE_LEFT_RAW  1479   // 摇头轴: 左摆最大
+#define POT_SHAKE_RIGHT_RAW 2231   // 摇头轴: 右摆最大
 #define POT_LIMIT_MARGIN    40     // 电子限位从极限内缩量 (读数噪声 ±20 的 2 倍)
 
 // 电位器闭环回中 (menuconfig: ITOY_HOME_POT): 目标中位读数与容差

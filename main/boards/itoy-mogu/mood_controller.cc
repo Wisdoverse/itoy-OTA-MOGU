@@ -313,8 +313,17 @@ void MoodController::OnShortTap(uint32_t now_ms) {
 }
 
 void MoodController::PollTouch(uint32_t now_ms) {
+#if CONFIG_ITOY_DISABLE_TOUCH
+    // 标定/防干扰: 真实触摸读数恒为未按下, 不触发任何事件; 每拍喂
+    // last_touch_ms_ 屏蔽"无触摸 10min -> SLEEPY / 再 5min 自动关机"。
+    // 触摸硬件仍在校准扫描, 调试网页仍显示通道读数; 网页模拟触摸不受影响。
+    last_touch_ms_ = now_ms;
+    bool l = false;
+    bool r = false;
+#else
     bool l = LeftPressed();
     bool r = RightPressed();
+#endif
     // 生产调试: 网页模拟触摸 — 有效期内并入对应侧读数, 从按下边沿到松开
     // 走完整事件链 (即时反应/长按分类/短按计数), 与真手指无差别
     if (synth_until_ms_ && now_ms < synth_until_ms_) {

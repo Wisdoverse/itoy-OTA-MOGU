@@ -124,6 +124,48 @@ bool StepperMotor::StepOnceLimited(bool clockwise) {
     return true;
 }
 
+// 开机方向自检: 朝一个方向步进一小段, 用读数实际变化方向校正 pot_cw_inc_。
+// 方向位标反 = 闭环发散 = "摸一下朝反方向一路甩到电子限位卡死且回不来"的根因。
+// 探测 ~150 步 ≈ 24 个读数计数, 开机多花 <1s, 头轻抽一下属预期。
+void StepperMotor::AutoCalibrateDirection() {
+#if MOTOR_HAS_POT
+    constexpr int kProbeSteps = 150;
+    constexpr int kMinDelta = 15;   // 平滑后噪声 ±7 的 2 倍余量
+    for (int attempt = 0; attempt < 2; attempt++) {
+        bool cw = (attempt == 0);
+        int r0 = (int)ReadPotSmooth(8);
+        int moved = 0;
+        for (int i = 0; i < kProbeSteps; i++) {
+            if (!StepOnceLimited(cw)) break;   // 撞电子限位 -> 换方向
+            // 注意: HZ=100 时 tick=10ms, pdMS_TO_TICKS(3)=0 -> vTaskDelay(0) 没有延时,
+            // 电机来不及转 (首版自检 Δ=0 全部失败的根因)。沿用 MotorLoop 的 <10ms 延时方案。
+            esp_rom_delay_us(3000);
+            if ((i & 63) == 63) vTaskDelay(1);   // 每 64 步喂一次调度器 (IDLE/看门狗)
+            moved++;
+        }
+        int delta = (int)ReadPotSmooth(8) - r0;
+        if (moved >= kProbeSteps / 2 && std::abs(delta) >= kMinDelta) {
+            // actual_inc: 顺时针是否使读数增大 (探测方向反推)
+            bool actual_inc = (delta > 0) == cw;
+            if (actual_inc != pot_cw_inc_) {
+                ESP_LOGW(TAG, "方向自检: pot_cw_inc 标定 %d 有误, 本次运行自动改为 %d "
+                              "(请同步更新 config.h 的 *_POT_CW_INC)",
+                         (int)pot_cw_inc_, (int)actual_inc);
+                pot_cw_inc_ = actual_inc;
+            } else {
+                ESP_LOGI(TAG, "方向自检: pot_cw_inc=%d 正确 (probe %s Δ=%d)",
+                         (int)pot_cw_inc_, cw ? "cw" : "ccw", delta);
+            }
+            Stop();
+            return;
+        }
+        ESP_LOGW(TAG, "方向自检: %s 方向探测无效 (moved=%d Δ=%d), 换方向重试",
+                 cw ? "cw" : "ccw", moved, delta);
+    }
+    ESP_LOGE(TAG, "方向自检失败: 两方向步进读数均无有效变化 (电位器未接/打滑/两轴都顶限位?)");
+#endif
+}
+
 void StepperMotor::Step(int steps) {
     bool clockwise = steps >= 0;
     int abs_steps = std::abs(steps);
@@ -234,6 +276,12 @@ void MotorControl::Initialize() {
     motors_[MOTOR_SHAKE]->Initialize();
     motors_[MOTOR_NOD]->SetPinOrder(MOTOR_NOD_PIN_ORDER);
     motors_[MOTOR_SHAKE]->SetPinOrder(MOTOR_SHAKE_PIN_ORDER);
+
+#if MOTOR_HAS_POT
+    // 方向自检须在任何闭环动作 (触摸反应/手势/回中) 之前
+    motors_[MOTOR_NOD]->AutoCalibrateDirection();
+    motors_[MOTOR_SHAKE]->AutoCalibrateDirection();
+#endif
 
     step_mutex_ = xSemaphoreCreateMutex();
 
@@ -443,7 +491,7 @@ void MotorControl::DualGestureDone() {
     dual_active_ = false;
     gesture_done_ = true;
     if (dual_auto_home_) {
-        home_steps_ = 0;
+        ArmHoming_();
         homing_ = true;        // 下一 tick 由 HomeTick 接管, 到位断电
     } else {
         StopAll();             // 立即断电
@@ -513,6 +561,11 @@ void MotorControl::PlayPosGesture(const PosStep* steps, int n, bool auto_center)
 int MotorControl::PosTick() {
     const PosStep& seg = pos_seq_[pos_idx_];
 
+    if (pos_seg_steps_ == 0) {   // 段起步: 重置发散保护基准
+        pos_nod_best_dist_ = 1 << 14;
+        pos_shake_best_dist_ = 1 << 14;
+    }
+
     int dist = 0;   // 两轴剩余距离合计 (步进前测量; 缓动进度分子)
     if (seg.nod_target < 0) pos_nod_done_ = true;
     else if (!pos_nod_done_) {
@@ -521,8 +574,18 @@ int MotorControl::PosTick() {
         int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
         if (std::abs(diff) <= POT_CENTER_TOL) pos_nod_done_ = true;
         else {
-            dist += std::abs(diff);
-            if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_nod_done_ = true;
+            int ad = std::abs(diff);
+            dist += ad;
+            if (ad < pos_nod_best_dist_) pos_nod_best_dist_ = ad;
+            // 发散保护: 步进一段后反而比历史最近点更远 -> 方向反/电位器打滑
+            // (开机方向自检已纠正方向位, 这里兜底) -> 放弃该轴, 不甩到对侧限位
+            else if (pos_seg_steps_ >= 40 && ad > pos_nod_best_dist_ + 25) {
+                ESP_LOGE(TAG, "nod 闭环发散 (第%d拍 距离%d best%d): 方向反或电位器打滑, 本段放弃该轴",
+                         pos_seg_steps_, ad, pos_nod_best_dist_);
+                pos_nod_done_ = true;
+            }
+            if (!pos_nod_done_ &&
+                !m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_nod_done_ = true;
         }
     }
     if (seg.shake_target < 0) pos_shake_done_ = true;
@@ -532,8 +595,16 @@ int MotorControl::PosTick() {
         int diff = target - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
         if (std::abs(diff) <= POT_CENTER_TOL) pos_shake_done_ = true;
         else {
-            dist += std::abs(diff);
-            if (!m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_shake_done_ = true;
+            int ad = std::abs(diff);
+            dist += ad;
+            if (ad < pos_shake_best_dist_) pos_shake_best_dist_ = ad;
+            else if (pos_seg_steps_ >= 40 && ad > pos_shake_best_dist_ + 25) {
+                ESP_LOGE(TAG, "shake 闭环发散 (第%d拍 距离%d best%d): 方向反或电位器打滑, 本段放弃该轴",
+                         pos_seg_steps_, ad, pos_shake_best_dist_);
+                pos_shake_done_ = true;
+            }
+            if (!pos_shake_done_ &&
+                !m->StepOnceLimited((diff > 0) == m->pot_cw_inc())) pos_shake_done_ = true;
         }
     }
 
@@ -549,7 +620,7 @@ int MotorControl::PosTick() {
         if (pos_idx_ >= pos_len_) {
             pos_active_ = false;
             if (pos_auto_center_) {
-                home_steps_ = 0;
+                ArmHoming_();
                 homing_ = true;   // 转回中 (到位断电)
                 ESP_LOGI(TAG, "pos gesture done -> centering");
                 return MOTOR_STEP_DELAY_MS * 2;
@@ -590,7 +661,7 @@ void MotorControl::Home() {
     pos_active_ = false;    // 回中取消位置手势
 #endif
     for (int i = 0; i < MOTOR_COUNT; i++) active_dir_[i] = 0;
-    home_steps_ = 0;
+    ArmHoming_();
     homing_ = true;
     xSemaphoreGive(step_mutex_);
 #if CONFIG_ITOY_HOME_POT
@@ -618,17 +689,37 @@ void MotorControl::RecordZero() {
 // 推进回中一微步, 返回本步延时。两种方式 (menuconfig ITOY_HOME_MODE 二选一):
 //   开环 (默认): 每轴按 pos_ 反向走一步 (把累计偏移归零), 两轴 pos_ 都到 0 则断电结束。
 //   电位器闭环: 每轴采样电位器, 朝中位读数步进, 进死区即停 — 不依赖步数累计/记录零位。
+// 进入回中前复位保护状态 (DualGestureDone / PosTick 自动回中 / Home() 三入口共用)
+void MotorControl::ArmHoming_() {
+    home_steps_ = 0;
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+        home_refused_[i] = 0;
+        home_skip_[i] = false;
+    }
+}
+
 int MotorControl::HomeTick() {
     bool done = true;
 #if CONFIG_ITOY_HOME_POT
     const uint32_t center[MOTOR_COUNT] = { POT_NOD_CENTER_RAW, POT_SHAKE_CENTER_RAW };
     for (int i = 0; i < MOTOR_COUNT; i++) {
+        if (home_skip_[i]) continue;   // 该轴已判顶死/异常, 放弃 (另一轴继续回中)
         StepperMotor* m = motors_[i];
         int diff = (int)center[i] - (int)m->ReadPotSmooth(POT_CENTER_SAMPLES);
         if (std::abs(diff) <= POT_CENTER_TOL) continue;   // 该轴已进死区
         done = false;
         bool cw = (diff > 0) == m->pot_cw_inc();          // 需增大读数 -> 按 cw_inc 方向走
-        m->StepOnceLimited(cw);
+        // 连续被电子限位拒绝 = 轴顶在限位且还没进死区 (方向反的典型残局) ->
+        // ~0.4s 后放弃该轴, 不再空转到 home_steps_ 上限 (原来要等 ~8s)
+        if (!m->StepOnceLimited(cw)) {
+            if (++home_refused_[i] > 100) {
+                home_skip_[i] = true;
+                ESP_LOGE(TAG, "home: 轴%d 顶在限位回不去 (读数 %lu, 距中位 %d), 放弃该轴",
+                         i, (unsigned long)m->ReadPotSmooth(), diff);
+            }
+        } else {
+            home_refused_[i] = 0;
+        }
     }
     // 超限保护: 中位到机械限位仅 ~300 步, 1/4 圈绰绰有余; 方向反/没接时少磨机械限位
     if (++home_steps_ > MOTOR_STEPS_PER_REV / 4) done = true;

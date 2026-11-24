@@ -40,6 +40,10 @@ public:
     // 当前方向是否允许继续步进 (软限位)
     bool CanStep(bool clockwise) const;
 
+    // 开机方向自检: 步进一小段由读数实际变化方向校正 pot_cw_inc_。
+    // 方向位标反 = 闭环发散 = 朝反方向甩到电子限位卡死且回不来的根因。
+    void AutoCalibrateDirection();
+
     // 停止 (所有相断电)
     void Stop();
 
@@ -172,6 +176,7 @@ private:
     void DualSetupSegment();    // 按 dual_[idx] 计算本段主/副轴参数 (Bresenham)
     void DualGestureDone();     // 双轴手势收尾: auto_home 则转回中, 否则断电
     int HomeTick();             // 推进回中一微步 (开环: 按 pos_ 至 0 / 电位器: 至中位读数), 返回本步延时
+    void ArmHoming_();          // 进入回中前复位步数/保护状态 (三个回中入口共用)
 #if CONFIG_ITOY_HOME_POT
     int PosTick();              // 推进位置手势一微步 (两轴各朝本段目标读数), 返回本步延时
 #endif
@@ -218,6 +223,8 @@ private:
     volatile bool pos_active_ = false;
     bool pos_auto_center_ = false;          // 结束后自动回中
     int pos_seg_start_dist_ = 0;           // 本段起步时两轴到目标合计距离 (缓动进度基准)
+    int pos_nod_best_dist_ = 1 << 14;      // 本段点头轴到目标的最小距离 (发散保护基准)
+    int pos_shake_best_dist_ = 1 << 14;    // 本段摇头轴同上
 #endif
 
     // 相对定位 (电位器未接入时): pos_ = 自"记录零位"以来的累计步数 (有符号, +=cw)。
@@ -225,6 +232,8 @@ private:
     int32_t pos_[MOTOR_COUNT] = {0, 0};
     volatile bool homing_ = false;   // 回中模式 (电机任务按 pos_ 反向步进至 0, 到位断电)
     int home_steps_ = 0;             // 回中步数累计 (超限保护)
+    int home_refused_[MOTOR_COUNT] = {0, 0};       // 回中连续被电子限位拒绝计数
+    bool home_skip_[MOTOR_COUNT] = {false, false}; // 回中被放弃的轴 (顶死/电位器异常)
     bool dual_auto_home_ = false;    // 双轴手势结束后自动回中
 };
 

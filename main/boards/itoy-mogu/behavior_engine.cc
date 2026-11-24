@@ -311,12 +311,18 @@ void BehaviorEngine::OnAllTouchUp() {
 }
 
 void BehaviorEngine::EnterCalm(uint32_t now_ms) {
+#if CONFIG_ITOY_DISABLE_IDLE
+    // 标定/防干扰: idle 小动作整体关闭 (优先于性格档; 网页 idle 按钮仍可单发)
+    idle_on_ = false;
+    ESP_LOGI(TAG, "calm (idle disabled by CONFIG_ITOY_DISABLE_IDLE)");
+#else
     idle_on_ = true;
-    breath_follow_ = false;   // 保持态出场 -> 呼吸联动随姿态一起结束 (CALM 只要 idle)
     // 进场先等半程随机间隔再开始 (开机不乱动)
     uint32_t half = (IDLE_MIN_MS + esp_random() % (IDLE_MAX_MS - IDLE_MIN_MS)) / 2;
     idle_next_ms_ = now_ms + half;
     ESP_LOGI(TAG, "calm idle on (first in ~%lus)", (unsigned long)(half / 1000));
+#endif
+    breath_follow_ = false;   // 保持态出场 -> 呼吸联动随姿态一起结束 (CALM 只要 idle)
 }
 
 void BehaviorEngine::LeaveCalm() {
